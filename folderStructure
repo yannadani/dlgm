@@ -1,7 +1,7 @@
 I downloaded following datasets:
--MPI-Sintel-complete
--Middlebury's other-color-twoframes
--CUB_200_2011
+-MPI-Sintel-complete (http://sintel.is.tue.mpg.de/downloads)
+-Middlebury's other-color-twoframes (http://vision.middlebury.edu/flow/data/)
+-CUB_200_2011 (http://www.vision.caltech.edu/visipedia/CUB-200-2011.html -> All Images and Annotations)
 
 Then the Folderstructure is as following:
 
