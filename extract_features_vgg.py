@@ -44,8 +44,8 @@ for root,dirs,files in os.walk(im_path):
     #Create a grid of pixels
         im = Image.open(osp.join(root,i)).convert('RGB')
         width, height = im.size
-        x_jump = int(width/5)
-        y_jump = int(height/5)
+        x_jump = int(width/10)
+        y_jump = int(height/10)
         x_idx = np.arange(int(x_jump/2),int(width - x_jump/2), x_jump)
         y_idx = np.arange(int(y_jump/2), int(height - y_jump/2), y_jump)
         vgg16(transformation(im).unsqueeze_(0))
