@@ -34,7 +34,7 @@ def init_config():
     # others
     parser.add_argument('--seed', type=int, default=7, metavar='S', help='random seed')
     parser.add_argument('--number_workers', '-nw', '--num_workers', type=int, default=8)
-    parser.add_argument('--number_gpus', '-ng', type=int, default=1, help='number of GPUs to use')  
+    parser.add_argument('--number_gpus', '-ng', type=int, default=2, help='number of GPUs to use')  
     parser.add_argument('--cuda', action='store_true', default=True, help='Use GPU') 
 
 
@@ -184,8 +184,8 @@ if __name__ == '__main__':
                'drop_last' : True} if args.cuda else {}
 
     if args.dataset.lower() == 'sintel':
-        train_dataset = MpiSintelFinal('../data/sintel/training')
-        val_dataset = MpiSintelClean('../data/sintel/training')
+        train_dataset = MpiSintelFinal('/cluster/scratch/ninos/3dv/data/sintel/training')
+        val_dataset = MpiSintelClean('/cluster/scratch/ninos/3dv/data/sintel/training')
         #test_dataset = MpiSintelClean('../data/sintel/test')
 
     elif args.dataset.lower() == 'middlebury':
@@ -197,11 +197,17 @@ if __name__ == '__main__':
         sys.stdout.flush()
 		
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, **gpuargs)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size_test, shuffle=False, **gpuargs)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size*torch.cuda.device_count(), shuffle=True, **gpuargs)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size_test*torch.cuda.device_count(), shuffle=False, **gpuargs)
     #test_loader = DataLoader(test_dataset, batch_size=args.batch_size_test, shuffle=False, **gpuargs)
 
-    model = VGG_graph_matching().to(args.device)
+    model = VGG_graph_matching()
+    if torch.cuda.device_count() > 1 and args.number_gpus > 1:
+        model = nn.DataParallel(model)
+    print("Using", torch.cuda.device_count(), "GPUs!")
+    model = model.to(args.device)
+
+
     optimizer = optim.Adam(model.parameters(), lr = 1e-3)
     best_loss = 1e4
 

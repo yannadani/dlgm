@@ -47,7 +47,6 @@ class VGG_graph_matching(nn.Module):
             
             M = self.affinityMatrix_forward(F1, F2, U1, U2, G, G, H, H) #TODO: Build appropriate graph structure before using this
             v = self.powerIteration_forward(M)
-            print(v.shape)
             #S = self.biStochastic_forward(v, G.shape[0], G.shape[0])
             d = self.voting_forward(S, P) #Have to get P still
             return d
@@ -158,18 +157,10 @@ class VGG_graph_matching(nn.Module):
 
         # Init starting v
         v = torch.ones(M.shape[0], M.shape[2],1)
-        v_old = torch.ones(M.shape[0], M.shape[2],1) * 1000.
-        print(torch.norm(v, 2, dim =0).shape)
-
         # Perform N iterations: v_k+1 = M*v_k / (||M*v_k||_2) 
         for i in range(N):
-            v = torch.bmm(M, v)
-            v = v / torch.norm(v, 2, dim = 1)
-            print(torch.norm(v - v_old))
-            v_old = v.clone()
-
-        print(v[0])
-        return v    
+            v = F.normalize(torch.bmm(M, v))
+            return v    
 
 
     def biStochastic_forward(self, v, n, m, N = 1):
@@ -210,7 +201,7 @@ class VGG_graph_matching(nn.Module):
         """
         S_ = alpha*S
         #TODO: Apply th
-        P_ = torch.mm(F.softmax(S, dim = -1), P) 
+        P_ = torch.bmm(F.softmax(S, dim = -1), P.expand(S_.shape[0], -1 , -1)) 
         d = torch.zeros(P.shape)
         for i in range(P.shape[0]):
             d[:, i] = P_ -  P[:, i]
