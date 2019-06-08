@@ -1,3 +1,4 @@
+import torch
 import torch.utils.data as data
 
 import os, math, random
@@ -27,12 +28,11 @@ class StaticCenterCrop(object):
         return img[(self.h-self.th)//2:(self.h+self.th)//2, (self.w-self.tw)//2:(self.w+self.tw)//2,:]
 
 class MpiSintel(data.Dataset):
-    def __init__(self, root, is_cropped = False, crop_size = (256, 256), dstype = 'clean', replicates = 1):
+    def __init__(self, root, is_cropped = True, crop_size = [40, 40], dstype = 'clean', replicates = 1):
         self.is_cropped = is_cropped
         self.crop_size = crop_size
         self.render_size = crop_size
         self.replicates = replicates
-
         flow_root = join(root, 'flow')
         image_root = join(root, dstype)
 
@@ -63,11 +63,10 @@ class MpiSintel(data.Dataset):
 
         self.frame_size = frame_utils.read_gen(self.image_list[0][0]).shape
 
-        if (self.render_size[0] < 0) or (self.render_size[1] < 0) or (self.frame_size[0]%64) or (self.frame_size[1]%64):
-            self.render_size[0] = ( (self.frame_size[0])//64 ) * 64
-            self.render_size[1] = ( (self.frame_size[1])//64 ) * 64
+        #if (self.render_size[0] < 0) or (self.render_size[1] < 0) or (self.frame_size[0]%64) or (self.frame_size[1]%64):
+        #    self.render_size[0] = ( (self.frame_size[0])//64 ) * 64
+        #   self.render_size[1] = ( (self.frame_size[1])//64 ) * 64
 
-        args.inference_size = self.render_size
 
         assert (len(self.image_list) == len(self.flow_list))
 
@@ -102,11 +101,11 @@ class MpiSintel(data.Dataset):
         return self.size * self.replicates
 
 class MpiSintelClean(MpiSintel):
-    def __init__(self, root, is_cropped = False, replicates = 1):
+    def __init__(self, root, is_cropped = True, replicates = 1):
         super(MpiSintelClean, self).__init__(root, is_cropped = is_cropped, dstype = 'clean', replicates = replicates)
 
 class MpiSintelFinal(MpiSintel):
-    def __init__(self, root, is_cropped = False, replicates = 1):
+    def __init__(self, root, is_cropped = True, replicates = 1):
         super(MpiSintelFinal, self).__init__(root, is_cropped = is_cropped, dstype = 'final', replicates = replicates)
 
 class ImagesFromFolder(data.Dataset):

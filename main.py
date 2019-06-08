@@ -7,7 +7,9 @@ import importlib
 import numpy as np
 import torch
 import torch.nn as nn
+from torch import optim
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from PIL import Image
 import pickle as pkl
@@ -22,7 +24,7 @@ def init_config():
     parser = argparse.ArgumentParser(description='Deep Learning of Graph matching')
 
     # dataset
-    parser.add_argument('--dataset', type=str, default='sintel', help='dataset to use: midlebury/sintel')
+    parser.add_argument('--dataset', type=str, default='sintel', help='dataset to use: middlebury/sintel')
 
     # select mode
     parser.add_argument('--eval', action='store_true', default=False, help='Perform Inference')
@@ -32,7 +34,7 @@ def init_config():
     # others
     parser.add_argument('--seed', type=int, default=7, metavar='S', help='random seed')
     parser.add_argument('--number_workers', '-nw', '--num_workers', type=int, default=8)
-    parser.add_argument('--number_gpus', '-ng', type=int, default=-1, help='number of GPUs to use')  
+    parser.add_argument('--number_gpus', '-ng', type=int, default=1, help='number of GPUs to use')  
     parser.add_argument('--cuda', action='store_true', default=True, help='Use GPU') 
 
 
@@ -83,11 +85,12 @@ def _apply_loss(d, d_gt):
     return torch.sum(torch.sqrt(torch.inner(d - d_gt, (d-d_gt).t()) + 1e-6))
 
 
-def get_mask(width, height, grid_size = 10): 
+def get_mask(height, width, grid_size = 10): 
     """
     Get the location based on the image size corresponding to relu_4_2 
     and relu_5_1 layer for a desired grid size. 
     """
+    print(height, width)
     x_jump = int(width/grid_size) 
     y_jump = int(height/grid_size)
     x_idx = np.linspace(int(x_jump/2),int(width - x_jump/2), grid_size, dtype = np.int32)
@@ -129,22 +132,24 @@ def test(args, epoch, model, data_loader):
 
         return total_loss / float(batch_idx + 1), (batch_idx + 1)
 
- def train(args, epoch, model, data_loader, optimizer):
+def train(args, epoch, model, data_loader, optimizer):
         statistics = []
         total_loss = 0
 
         model.train()
         title = 'Training Epoch {}'.format(epoch)
-        progress = tqdm(tools.IteratorTimer(data_loader), ncols=120, total=np.minimum(len(data_loader), args.train_n_batches), smoothing=.9, miniters=1, leave=True, position=offset, desc=title)
+        progress = tqdm(tools.IteratorTimer(data_loader), ncols=120, total=len(data_loader), smoothing=.9, miniters=1, leave=True, desc=title)
 
         sys.stdout.flush()
 
         for batch_idx, (data, target) in enumerate(progress):
 
-            data, target = data.to(args.device), target.to(args.device)
+            #data, target = data.to(args.device), target.to(args.device)
 
-            optimizer.zero_grad() if not is_validate else None
-            d = model(data[0], get_mask(data[0]), data[1], get_mask(data[1]))
+            optimizer.zero_grad()
+            data = data[0] 
+            target = target[0]
+            d = model(data[:,:,0].to(args.device), im_2 = data[:,:,1].to(args.device))
             loss = _apply_loss(d, target)
             total_loss += loss_val.item()
 
@@ -169,7 +174,7 @@ def test(args, epoch, model, data_loader):
 
 
 if __name__ == '__main__':
-	args = init_config()
+    args = init_config()
     if not args.eval:
         sys.stdout = Logger(args.log_path)
 
@@ -179,31 +184,31 @@ if __name__ == '__main__':
                'drop_last' : True} if args.cuda else {}
 
     if args.dataset.lower() == 'sintel':
-		train_dataset = MpiSintelFinal('~/Downloads/MPI-Sintel-complete/training')
-		val_dataset = MpiSintelClean('~/Downloads/MPI-Sintel-complete/training')
-		test_dataset = MpiSintelClean('~/Downloads/MPI-Sintel-complete/training')
+        train_dataset = MpiSintelFinal('../data/sintel/training')
+        val_dataset = MpiSintelClean('../data/sintel/training')
+        #test_dataset = MpiSintelClean('../data/sintel/test')
 
-	elif args.dataset.lower() == 'midlebury':
-		train_dataset = ImagesFromFolder('~/Downloads/MPI-Sintel-complete/training') #TODO: Change the root
-		val_dataset = ImagesFromFolder('~/Downloads/MPI-Sintel-complete/training')
-		test_dataset = ImagesFromFolder('~/Downloads/MPI-Sintel-complete/training')
-	else:
-		raise Exception('Dataset not supported. Choose between Midlebury and Sintel.')
-		sys.stdout.flush()
+    elif args.dataset.lower() == 'middlebury':
+        train_dataset = ImagesFromFolder('~/Downloads/MPI-Sintel-complete/training') #TODO: Change the root
+        val_dataset = ImagesFromFolder('~/Downloads/MPI-Sintel-complete/training')
+        test_dataset = ImagesFromFolder('~/Downloads/MPI-Sintel-complete/training')
+    else:
+        raise Exception('Dataset not supported. Choose between Midlebury and Sintel.')
+        sys.stdout.flush()
 		
 
-	train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, **gpuargs)
-	val_loader = DataLoader(val_dataset, batch_size=args.batch_size_test, shuffle=False, **gpuargs)
-	test_loader = DataLoader(test_dataset, batch_size=args.batch_size_test, shuffle=False, **gpuargs)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, **gpuargs)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size_test, shuffle=False, **gpuargs)
+    #test_loader = DataLoader(test_dataset, batch_size=args.batch_size_test, shuffle=False, **gpuargs)
 
-	model = VGG_graph_matching().to(args.device)
-	optimizer = nn.optim.Adam(model.parameters(), lr = 1e-3)
-	best_loss = 1e4
+    model = VGG_graph_matching().to(args.device)
+    optimizer = optim.Adam(model.parameters(), lr = 1e-3)
+    best_loss = 1e4
 
-	for i in range(1, args.n_epochs+1):
-		train(args, i, model, train_loader, optimizer)
-		loss = test(args, i, model, val_loader)
-		if loss < best_loss:
-			best_loss = loss
-			torch.save(vae.state_dict(), args.save_path)	 
+    for i in range(1, args.n_epochs+1):
+        train(args, i, model, train_loader, optimizer)
+        loss = test(args, i, model, val_loader)
+        if loss < best_loss:
+            best_loss = loss
+            torch.save(vae.state_dict(), args.save_path)	 
 		
