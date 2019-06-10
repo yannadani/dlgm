@@ -36,6 +36,7 @@ def init_config():
     parser.add_argument('--number_workers', '-nw', '--num_workers', type=int, default=8)
     parser.add_argument('--number_gpus', '-ng', type=int, default=2, help='number of GPUs to use')  
     parser.add_argument('--cuda', action='store_true', default=True, help='Use GPU') 
+    parser.add_argument('--use_vgg', action='store_true', default=True, help='Use VGG weights') 
 
 
 
@@ -202,6 +203,10 @@ if __name__ == '__main__':
     #test_loader = DataLoader(test_dataset, batch_size=args.batch_size_test, shuffle=False, **gpuargs)
 
     model = VGG_graph_matching()
+
+    if args.use_vgg:
+        model.copy_params_from_vgg16()
+
     if torch.cuda.device_count() > 1 and args.number_gpus > 1:
         model = nn.DataParallel(model)
     print("Using", torch.cuda.device_count(), "GPUs!")

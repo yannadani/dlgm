@@ -28,7 +28,7 @@ class StaticCenterCrop(object):
         return img[(self.h-self.th)//2:(self.h+self.th)//2, (self.w-self.tw)//2:(self.w+self.tw)//2,:]
 
 class MpiSintel(data.Dataset):
-    def __init__(self, root, is_cropped = True, crop_size = [40, 40], dstype = 'clean', replicates = 1):
+    def __init__(self, root, is_cropped = True, crop_size = [4, 4], dstype = 'clean', replicates = 1):
         self.is_cropped = is_cropped
         self.crop_size = crop_size
         self.render_size = crop_size

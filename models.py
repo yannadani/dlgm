@@ -4,37 +4,161 @@ import torch.nn.functional as F
 from torchvision import models
 import numpy as np
 
-vgg_bn = models.vgg16_bn(pretrained = True)
+def get_upsampling_weight(in_channels, out_channels, kernel_size):
+    """Make a 2D bilinear kernel suitable for upsampling"""
+    factor = (kernel_size + 1) // 2
+    if kernel_size % 2 == 1:
+        center = factor - 1
+    else:
+        center = factor - 0.5
+    og = np.ogrid[:kernel_size, :kernel_size]
+    filt = (1 - abs(og[0] - center) / factor) * \
+           (1 - abs(og[1] - center) / factor)
+    weight = np.zeros((in_channels, out_channels, kernel_size, kernel_size),
+                      dtype=np.float64)
+    weight[range(in_channels), range(out_channels), :, :] = filt
+    return torch.from_numpy(weight).float()
+
+
 class VGG_graph_matching(nn.Module):
     def __init__(self):
         super(VGG_graph_matching, self).__init__()
-        self.features1 = nn.Sequential(
-            *list(vgg_bn.features.children())[:33]
-        )
-        self.features2 = nn.Sequential(
-            *list(vgg_bn.features.children())[33:43]
-        )
-                # => TODO: lambda init for trivial test
-        self.lam = nn.Parameter(torch.ones(1024, 1024))
+        # conv1
+        self.conv1_1 = nn.Conv2d(3, 64, 3, padding=100)
+        self.relu1_1 = nn.ReLU(inplace=True)
+        self.conv1_2 = nn.Conv2d(64, 64, 3, padding=1)
+        self.relu1_2 = nn.ReLU(inplace=True)
+        self.pool1 = nn.MaxPool2d(2, stride=2, ceil_mode=True)  # 1/2
+
+        # conv2
+        self.conv2_1 = nn.Conv2d(64, 128, 3, padding=1)
+        self.relu2_1 = nn.ReLU(inplace=True)
+        self.conv2_2 = nn.Conv2d(128, 128, 3, padding=1)
+        self.relu2_2 = nn.ReLU(inplace=True)
+        self.pool2 = nn.MaxPool2d(2, stride=2, ceil_mode=True)  # 1/4
+
+        # conv3
+        self.conv3_1 = nn.Conv2d(128, 256, 3, padding=1)
+        self.relu3_1 = nn.ReLU(inplace=True)
+        self.conv3_2 = nn.Conv2d(256, 256, 3, padding=1)
+        self.relu3_2 = nn.ReLU(inplace=True)
+        self.conv3_3 = nn.Conv2d(256, 256, 3, padding=1)
+        self.relu3_3 = nn.ReLU(inplace=True)
+        self.pool3 = nn.MaxPool2d(2, stride=2, ceil_mode=True)  # 1/8
+
+        # conv4
+        self.conv4_1 = nn.Conv2d(256, 512, 3, padding=1)
+        self.relu4_1 = nn.ReLU(inplace=True)
+        self.conv4_2 = nn.Conv2d(512, 512, 3, padding=1)
+        self.relu4_2 = nn.ReLU(inplace=True)
+        self.conv4_3 = nn.Conv2d(512, 512, 3, padding=1)
+        self.relu4_3 = nn.ReLU(inplace=True)
+        self.pool4 = nn.MaxPool2d(2, stride=2, ceil_mode=True)  # 1/16
+
+        # conv5
+        self.conv5_1 = nn.Conv2d(512, 512, 3, padding=1)
+        self.relu5_1 = nn.ReLU(inplace=True)   
+
+        self.score = nn.Conv2d(512, 64, 1)  
+
+        self.upscore32 = nn.ConvTranspose2d(64, 64, 64, stride=32,
+                                          bias=False)  
+        self.upscore16 = nn.ConvTranspose2d(64, 64, 32, stride=16,
+                                          bias=False)  
+
+        self.lam = nn.Parameter(torch.ones(128, 128))
+
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                m.weight.data.zero_()
+                if m.bias is not None:
+                    m.bias.data.zero_()
+            if isinstance(m, nn.ConvTranspose2d):
+                assert m.kernel_size[0] == m.kernel_size[1]
+                initial_weight = get_upsampling_weight(
+                    m.in_channels, m.out_channels, m.kernel_size[0])
+                m.weight.data.copy_(initial_weight)
+
+    def copy_params_from_vgg16(self):
+        vgg16 = models.vgg16(pretrained = True)
+        features = [
+            self.conv1_1, self.relu1_1,
+            self.conv1_2, self.relu1_2,
+            self.pool1,
+            self.conv2_1, self.relu2_1,
+            self.conv2_2, self.relu2_2,
+            self.pool2,
+            self.conv3_1, self.relu3_1,
+            self.conv3_2, self.relu3_2,
+            self.conv3_3, self.relu3_3,
+            self.pool3,
+            self.conv4_1, self.relu4_1,
+            self.conv4_2, self.relu4_2,
+            self.conv4_3, self.relu4_3,
+            self.pool4,
+            self.conv5_1, self.relu5_1
+                ]
+        for l1, l2 in zip(vgg16.features, features):
+            if isinstance(l1, nn.Conv2d) and isinstance(l2, nn.Conv2d):
+                assert l1.weight.size() == l2.weight.size()
+                assert l1.bias.size() == l2.bias.size()
+                l2.weight.data.copy_(l1.weight.data)
+                l2.bias.data.copy_(l1.bias.data)
+
+    def apply_forward(self, x):
+        h = x
+        h = self.relu1_1(self.conv1_1(h))
+        h = self.relu1_2(self.conv1_2(h))
+        h = self.pool1(h)
+
+        h = self.relu2_1(self.conv2_1(h))
+        h = self.relu2_2(self.conv2_2(h))
+        h = self.pool2(h)
+
+        h = self.relu3_1(self.conv3_1(h))
+        h = self.relu3_2(self.conv3_2(h))
+        h = self.relu3_3(self.conv3_3(h))
+        h = self.pool3(h)
+        pool3 = h  # 1/8
+
+        h = self.relu4_1(self.conv4_1(h))
+        feat1 = self.relu4_2(self.conv4_2(h))
+
+        h = self.relu4_3(self.conv4_3(feat1))
+        h = self.pool4(h)
+
+        h = self.relu5_1(self.conv5_1(h))
+
+        x_1 = self.upscore16(self.score(feat1))
+        x_1 = x_1[:, :, 9:9 + x.size()[2], 9:9 + x.size()[3]].contiguous() 
+
+
+        x_2 = self.upscore32(self.score(h))
+        x_2 = x_2[:, :, 19:19 + x.size()[2], 19:19 + x.size()[3]].contiguous()
+
+        return x_1, x_2
+
+
 
     def forward(self, im_1, mask_1=None, im_2 = None, mask_2 = None):
         
-        x_1 = self.features1(im_1)
+        x_1, x_2 = self.apply_forward(im_1)
 
-        x_2 = self.features2(x_1)
         if mask_1 is None:
             F1 = x_1
             U1 = x_2
         else:
             F1 = x_1[:,:, mask_1[0]]
             U1 =  x_2[:,:, mask_1[1]]
+        print(F1.shape, U1.shape)
         if im_2 is None:
             return U1, F1
         
         else:
-            x_21 = self.features1(im_2)
-            
-            x_22 = self.features2(x_21)
+            x_21, x_22 = self.apply_forward(im_2)
             if mask_2 is None:
                F2 = x_21
                U2 = x_22
@@ -42,7 +166,8 @@ class VGG_graph_matching(nn.Module):
                F2 = x_21[:,:, mask_2[0]]
                U2 =  x_22[:,:, mask_2[1]]
             
-            test = torch.from_numpy(np.asarray([[1,0,1,1],[1,1,1,1],[1,0,0,1],[1,0,0,1]]))
+            #test = torch.from_numpy(np.asarray([[1,0,1,1],[1,1,1,1],[1,0,0,1],[1,0,0,1]]))
+            test = torch.from_numpy(np.ones((F1.shape[-1], F1.shape[-1]), dtype = np.int32))
             [G, H] = self.buildGraphStructure(test)
             
             M = self.affinityMatrix_forward(F1, F2, U1, U2, G, G, H, H) #TODO: Build appropriate graph structure before using this
@@ -160,7 +285,7 @@ class VGG_graph_matching(nn.Module):
         # Perform N iterations: v_k+1 = M*v_k / (||M*v_k||_2) 
         for i in range(N):
             v = F.normalize(torch.bmm(M, v))
-            return v    
+        return v    
 
 
     def biStochastic_forward(self, v, n, m, N = 1):

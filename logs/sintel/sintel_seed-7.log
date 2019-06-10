@@ -1,1 +1,2 @@
-Using 4 GPUs!
+Using 1 GPUs!
+torch.Size([8, 64, 4, 4]) torch.Size([8, 64, 4, 4])
