@@ -68,6 +68,8 @@ class VGG_graph_matching(nn.Module):
 
         self.lam = nn.Parameter(torch.ones(128, 128))
 
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         self._initialize_weights()
 
     def _initialize_weights(self):
@@ -83,7 +85,7 @@ class VGG_graph_matching(nn.Module):
                 m.weight.data.copy_(initial_weight)
 
     def copy_params_from_vgg16(self):
-        vgg16 = models.vgg16(pretrained = True)
+        vgg16 = models.vgg16(pretrained = False)   # Enabling/Disabling Pretrained-Version of VGG
         features = [
             self.conv1_1, self.relu1_1,
             self.conv1_2, self.relu1_2,
@@ -144,6 +146,9 @@ class VGG_graph_matching(nn.Module):
 
 
     def forward(self, im_1, mask_1=None, im_2 = None, mask_2 = None):
+        """
+        FORWARD PASS - IMPLEMENTATION
+        """
         
         x_1, x_2 = self.apply_forward(im_1)
 
@@ -166,16 +171,30 @@ class VGG_graph_matching(nn.Module):
                F2 =  x_21[:,:, mask_2[0]]
                U2 =  x_22[:,:, mask_2[1]]
             
-            #test = torch.from_numpy(np.asarray([[1,1,1,1],[1,1,1,1],[1,1,1,1],[1,1,1,1]]))
-            test = torch.ones(im_1.shape[0]*im_1.shape[1],im_1.shape[0]*im_1.shape[1]) # Fully connected graph structure
+            # test = torch.ones(im_1.shape[2]*im_1.shape[3],im_1.shape[2]*im_1.shape[3]) # Fully connected graph structure
+            # TODO: Setup different sparse graph structures for testing
+            test = torch.eye(im_1.shape[2]*im_1.shape[3]) # Identitiy matrix for testing
             [G, H] = self.buildGraphStructure(test)
-    
             M = self.affinityMatrix_forward(F1, F2, U1, U2, G, G, H, H) 
             v = self.powerIteration_forward(M)
-            #S = self.biStochastic_forward(v, G.shape[0], G.shape[0])
+            #S = self.biStochastic_forward(v, G.shape[0], G.shape[0])  # Disable Bi-Stochastic Layer -> not necessary for optical flow
             d = self.voting_flow_forward(v)
+
             return d
+
+
     def kronecker(self, matrix1, matrix2):
+        """
+        Arguments:
+        ----------
+            - matrix1: batch-wise stacked matrices1
+            - matrix2: batch-wise stacked matrices2
+
+        Returns:
+        --------
+            - Batchwise Kronecker product between matrix1 and matrix2
+
+        """
         return torch.ger(matrix1.view(-1), matrix2.view(-1)).reshape(*(matrix1.size() + matrix2.size())).permute([0, 2, 1, 3]).reshape(matrix1.size(0) * matrix2.size(0), matrix1.size(1) * matrix2.size(1))
 
 
@@ -219,6 +238,7 @@ class VGG_graph_matching(nn.Module):
         dims = [input.size(i) for i in torch.arange(input.dim())]
         dims.append(dims[-1])
         output = torch.zeros(dims)
+        #output = torch.zeros(dims, device=self.device)
         # stride across the first dimensions, add one to get the diagonal of the last dimension
         strides = [output.stride(i) for i in torch.arange(input.dim() - 1 )]
         strides.append(output.size(-1) + 1)
@@ -243,26 +263,26 @@ class VGG_graph_matching(nn.Module):
         """
         # (a) Build X and Y
         #     - Get ordering of edges from G and H
-        #     - Extract edge features of start and end nodes and concat
+        #     - Extract edge features of start and end nodes
         idx1_start = (G1 != 0).nonzero()[:,0]
         idx2_start = (G2 != 0).nonzero()[:,0]
         idx1_end = (H1 != 0).nonzero()[:,0]
         idx2_end = (H2 != 0).nonzero()[:,0]
-        #X = torch.cat((F1[:,np.array(idx1_start)], F1[:,np.array(idx1_end)]), 2)
-        #Y = torch.cat((F2[:,np.array(idx2_start)], F2[:,np.array(idx2_end)]), 2)
+
+
+        # (b) Concat feature vectors (as described in paper)
         X = torch.cat((F1.view(F1.shape[0],F1.shape[1],-1)[:,:,idx1_start], F1.view(F1.shape[0],F1.shape[1],-1)[:,:,idx1_end]), 1).permute(0,2,1)
         Y = torch.cat((F2.view(F2.shape[0],F2.shape[1],-1)[:,:,idx2_start], F2.view(F2.shape[0],F2.shape[1],-1)[:,:,idx2_end]), 1).permute(0,2,1)
 
-        # (b) Calculate M_e = X * \lambda * Y^T
+        # (c) Calculate M_e = X * \lambda * Y^T
         M_e = torch.bmm(torch.bmm(X, self.lam.expand(X.shape[0],-1,-1)), Y.permute(0,2,1))
 
-        # (c) Calculate M_p = U1 * U2^T
-        #M_p = torch.mm(U1, U2.t())
+        # (d) Calculate M_p = U1 * U2^T
         M_p = torch.bmm(U1.view(U1.shape[0], U1.shape[1], -1).permute(0,2,1), U2.view(U2.shape[0], U2.shape[1], -1))
 
-        # Calculate M = [vec(M_p)] + (G_2 \kronecker G_1)[vec(M_e)](H_2 \kronecker H_1)^T
-        diagM_p = self.batch_diagonal(M_p.view(M_p.shape[0],-1))       
-        diagM_e = self.batch_diagonal(M_e.view(M_e.shape[0],-1))    
+        # (e) Calculate M = [vec(M_p)] + (G_2 \kronecker G_1)[vec(M_e)](H_2 \kronecker H_1)^T
+        diagM_p = self.batch_diagonal(M_p.view(M_p.shape[0],-1))    
+        diagM_e = self.batch_diagonal(M_e.view(M_e.shape[0],-1))  
         M = diagM_p + torch.bmm(torch.bmm(self.kronecker(G2, G1).expand(M_p.shape[0],-1,-1), diagM_e), self.kronecker(H2, H1).expand(M_e.shape[0],-1,-1).permute(0, 2,1))
 
         return M
@@ -281,6 +301,7 @@ class VGG_graph_matching(nn.Module):
 
         # Init starting v
         v = torch.ones(M.shape[0], M.shape[2], 1)
+
         # Perform N iterations: v_k+1 = M*v_k / (||M*v_k||_2) 
         for i in range(N):
             v = F.normalize(torch.bmm(M, v), dim=1)
@@ -313,24 +334,39 @@ class VGG_graph_matching(nn.Module):
 
 
     def voting_flow_forward(self, v, alpha=1, th = 10):
+        """
+        Arguments:
+        ----------
+            v: optimal assignment vector (output from power iteration)
+            alpha: scale value in softmax
+            th: threshold value
+
+        Returns:
+        --------
+            d: displacement vector
+
+        """
 
         n = int(np.sqrt(v.shape[1]))
+        n_ = int(np.sqrt(n))
 
         # Calculate coordinate arrays
-        i_coords, j_coords = np.meshgrid(range(n), range(n), indexing='ij')
-        [P_x, P_y] = torch.from_numpy(np.array([i_coords, j_coords]))
-        P_x = P_x.expand(v.shape[0],-1,-1).to(torch.float32)
-        P_y = P_y.expand(v.shape[0],-1,-1).to(torch.float32)
+        i_coords, j_coords = np.meshgrid(range(n_), range(n_), indexing='ij')
+        [P_y, P_x] = torch.from_numpy(np.array([i_coords, j_coords]))
+        P_x = P_x.view(1, n, -1).expand(v.shape[0],-1, -1).to(torch.float32)
+        P_y = P_y.view(1, n, -1).expand(v.shape[0],-1, -1).to(torch.float32)
 
         # Perform displacement calculation
         S = alpha * v.view(v.shape[0], n, -1)
-        print(S)
         S_ = F.softmax(S, dim = -1)
-        print(S_)
-        #P_x_ = torch.bmm(S_, P_x)
-        #P_y_ = torch.bmm(S_, P_y) 
-
+        P_x_ = torch.bmm(S_, P_x)
+        P_y_ = torch.bmm(S_, P_y) 
+        d_x = P_x_ - P_x
+        d_y = P_y_ - P_y
+        d = torch.cat((d_x, d_y), dim=2)
+        
         return d
+
 
     def voting_forward(self, S, P, alpha = 200., th = 10):
         """
