@@ -113,20 +113,21 @@ def test(args, epoch, model, data_loader):
         progress = tqdm(tools.IteratorTimer(data_loader), ncols=120, total=len(data_loader), smoothing=.9, miniters=1, leave=True, desc=title)
 
         sys.stdout.flush()
-        for batch_idx, (data, target) in enumerate(progress):
+        with torch.no_grad():
+            for batch_idx, (data, target) in enumerate(progress):
 
-            data = data[0] 
-            target = target[0]
-            d = model(data[:,:,0].to(args.device), im_2 = data[:,:,1].to(args.device))
-            loss = _apply_loss(d, target).mean()
-            total_loss += loss.item()
+                data = data[0] 
+                target = target[0]
+                d = model(data[:,:,0].to(args.device), im_2 = data[:,:,1].to(args.device))
+                loss = _apply_loss(d, target).mean()
+                total_loss += loss.item()
 
-            # Print out statistics
-            statistics.append(loss.item())
-            title = '{} Epoch {}'.format('Validating', epoch)
+                # Print out statistics
+                statistics.append(loss.item())
+                title = '{} Epoch {}'.format('Validating', epoch)
 
-            progress.set_description(title + '\tLoss:\t'+ str(statistics[-1]))
-            sys.stdout.flush()
+                progress.set_description(title + '\tLoss:\t'+ str(statistics[-1]))
+                sys.stdout.flush()
 
 
         progress.close()
