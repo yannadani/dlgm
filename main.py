@@ -221,5 +221,5 @@ if __name__ == '__main__':
         loss = test(args, i, model, val_loader)
         if loss < best_loss:
             best_loss = loss
-            torch.save(vae.state_dict(), args.save_path)	 
+            torch.save(model.state_dict(), args.save_path)	 
 		
