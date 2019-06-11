@@ -131,7 +131,7 @@ def test(args, epoch, model, data_loader):
 
         progress.close()
 
-        return total_loss / float(batch_idx + 1), (batch_idx + 1)
+        return total_loss / float(batch_idx + 1)
 
 def train(args, epoch, model, data_loader, optimizer):
         statistics = []
@@ -171,7 +171,7 @@ def train(args, epoch, model, data_loader, optimizer):
 
         progress.close()
 
-        return total_loss / float(batch_idx + 1), (batch_idx + 1)
+        return total_loss / float(batch_idx + 1)
 
 
 if __name__ == '__main__':
