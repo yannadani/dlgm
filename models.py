@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
 import numpy as np
+import pandas as pd
 
 def get_upsampling_weight(in_channels, out_channels, kernel_size):
     """Make a 2D bilinear kernel suitable for upsampling"""
@@ -68,15 +69,14 @@ class VGG_graph_matching(nn.Module):
 
         self.lam = nn.Parameter(torch.ones(128, 128))
 
-
         self._initialize_weights()
 
     def _initialize_weights(self):
         for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                m.weight.data.zero_()
-                if m.bias is not None:
-                    m.bias.data.zero_()
+            #if isinstance(m, nn.Conv2d):
+            #    m.weight.data.zero_()
+            #    if m.bias is not None:
+            #        m.bias.data.zero_()
             if isinstance(m, nn.ConvTranspose2d):
                 assert m.kernel_size[0] == m.kernel_size[1]
                 initial_weight = get_upsampling_weight(
@@ -170,10 +170,17 @@ class VGG_graph_matching(nn.Module):
                F2 =  x_21[:,:, mask_2[0]]
                U2 =  x_22[:,:, mask_2[1]]
             
-            # test = torch.ones(im_1.shape[2]*im_1.shape[3],im_1.shape[2]*im_1.shape[3]) # Fully connected graph structure
-            # TODO: Setup different sparse graph structures for testing
-            test = torch.eye(im_1.shape[2]*im_1.shape[3]) # Identitiy matrix for testing
-            [G, H] = self.buildGraphStructure(test)
+            # Load affinity matrix from CSV
+            # - eye --> eye-matrix (WORKING)
+            # - 9pt-stencil --> complete 9pt stencil (NOT WORKING => MEMORY ISSUES)
+            # - 9pt-stencil-upper --> upper diag + diag of 9pt stencil (WORKING)
+            graphStructure = "9pt-stencil-upper"
+            A = torch.from_numpy(pd.read_csv(graphStructure + '.csv', header=None).values) 
+
+            # Build Graph Structure based on given affinity matrix
+            [G, H] = self.buildGraphStructure(A)
+
+            # Compute Forward pass using building blocks from paper
             M = self.affinityMatrix_forward(F1, F2, U1, U2, G, G, H, H) 
             v = self.powerIteration_forward(M)
             #S = self.biStochastic_forward(v, G.shape[0], G.shape[0])  # Disable Bi-Stochastic Layer -> not necessary for optical flow
@@ -286,7 +293,7 @@ class VGG_graph_matching(nn.Module):
 
         return M
 
-    def powerIteration_forward(self, M, N = 100):
+    def powerIteration_forward(self, M, N = 10):
         """
         Arguments:
         ----------
@@ -304,7 +311,7 @@ class VGG_graph_matching(nn.Module):
         # Perform N iterations: v_k+1 = M*v_k / (||M*v_k||_2) 
         for i in range(N):
             v = F.normalize(torch.bmm(M, v), dim=1)
-    
+
         return v    
 
 
@@ -332,7 +339,7 @@ class VGG_graph_matching(nn.Module):
         return S
 
 
-    def voting_flow_forward(self, v, alpha=1, th = 10):
+    def voting_flow_forward(self, v, alpha=200., th = 10):
         """
         Arguments:
         ----------
