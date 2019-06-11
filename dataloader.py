@@ -90,7 +90,8 @@ class MpiSintel(data.Dataset):
         flow = cropper(flow)
 
         images = np.array(images).transpose(3,0,1,2)
-        flow = flow.transpose(2,0,1)
+        flow = flow.reshape((flow.shape[0]*flow.shape[1],-1))
+
 
         images = torch.from_numpy(images.astype(np.float32))
         flow = torch.from_numpy(flow.astype(np.float32))

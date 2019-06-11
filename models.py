@@ -68,7 +68,6 @@ class VGG_graph_matching(nn.Module):
 
         self.lam = nn.Parameter(torch.ones(128, 128))
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self._initialize_weights()
 
@@ -85,7 +84,7 @@ class VGG_graph_matching(nn.Module):
                 m.weight.data.copy_(initial_weight)
 
     def copy_params_from_vgg16(self):
-        vgg16 = models.vgg16(pretrained = False)   # Enabling/Disabling Pretrained-Version of VGG
+        vgg16 = models.vgg16(pretrained = True)   # Enabling/Disabling Pretrained-Version of VGG
         features = [
             self.conv1_1, self.relu1_1,
             self.conv1_2, self.relu1_2,
@@ -228,7 +227,6 @@ class VGG_graph_matching(nn.Module):
 
         return [G, H]
 
-
     @staticmethod
     def batch_diagonal(input):
         # idea from here: https://discuss.pytorch.org/t/batch-of-diagonal-matrix/13560
@@ -244,7 +242,8 @@ class VGG_graph_matching(nn.Module):
         strides.append(output.size(-1) + 1)
         # stride and copy the imput to the diagonal 
         output.as_strided(input.size(), strides ).copy_(input)
-        return output    
+        return output  
+  
 
 
     def affinityMatrix_forward(self, F1, F2, U1, U2, G1, G2, H1, H2):

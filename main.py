@@ -83,7 +83,7 @@ def init_config():
     return args
 
 def _apply_loss(d, d_gt):
-    return torch.sum(torch.sqrt(torch.inner(d - d_gt, (d-d_gt).t()) + 1e-6))
+    return torch.sum(torch.sqrt(torch.diagonal(torch.bmm(d - d_gt, (d-d_gt).permute(0,2,1)), dim1=-2, dim2=-1)), dim = 1)
 
 
 def get_mask(height, width, grid_size = 10): 
@@ -110,22 +110,22 @@ def test(args, epoch, model, data_loader):
 
         model.eval()
         title = 'Validating Epoch {}'.format(epoch)
-        progress = tqdm(tools.IteratorTimer(data_loader), ncols=100, total=len(data_loader), leave=True, position=offset, desc=title)
+        progress = tqdm(tools.IteratorTimer(data_loader), ncols=120, total=len(data_loader), smoothing=.9, miniters=1, leave=True, desc=title)
 
         sys.stdout.flush()
         for batch_idx, (data, target) in enumerate(progress):
 
-            data, target = data.to(args.device), target.to(args.device)
-
-            d = model(data[0], get_mask(data[0]), data[1], get_mask(data[1]))
-            loss = _apply_loss(d, target)
-            total_loss += loss_val.item()
+            data = data[0] 
+            target = target[0]
+            d = model(data[:,:,0].to(args.device), im_2 = data[:,:,1].to(args.device))
+            loss = _apply_loss(d, target).mean()
+            total_loss += loss.item()
 
             # Print out statistics
-            statistics.append(loss_values)
+            statistics.append(loss.item())
             title = '{} Epoch {}'.format('Validating', epoch)
 
-            progress.set_description(title + ' ' + tools.format_dictionary_of_losses(loss_labels, statistics[-1]))
+            progress.set_description(title + '\tLoss:\t'+ str(statistics[-1]))
             sys.stdout.flush()
 
 
@@ -151,21 +151,21 @@ def train(args, epoch, model, data_loader, optimizer):
             data = data[0] 
             target = target[0]
             d = model(data[:,:,0].to(args.device), im_2 = data[:,:,1].to(args.device))
-            loss = _apply_loss(d, target)
-            total_loss += loss_val.item()
-
-
-            assert not np.isnan(total_loss)
+            loss = _apply_loss(d, target).mean()
+            
+            
 
             loss.backward()
-            torch.nn.utils.clip_grad_norm(model.parameters(), args.gradient_clip)
+            #torch.nn.utils.clip_grad_norm_(model.parameters(), args.gradient_clip)
             optimizer.step()
+            total_loss += loss.item()
+            assert not np.isnan(total_loss)
 
             # Print out statistics
-            statistics.append(loss_values)
+            statistics.append(loss.item())
             title = '{} Epoch {}'.format('Training', epoch)
 
-            progress.set_description(title + ' ' + tools.format_dictionary_of_losses(loss_labels, statistics[-1]))
+            progress.set_description(title + '\tLoss:\t'+ str(statistics[-1]))
             sys.stdout.flush()
 
 
@@ -213,9 +213,8 @@ if __name__ == '__main__':
     model = model.to(args.device)
 
 
-    optimizer = optim.Adam(model.parameters(), lr = 1e-3)
-    best_loss = 1e4
-
+    optimizer = optim.Adam(model.parameters(), lr = 1e-5)
+    best_loss = 1e10
     for i in range(1, args.n_epochs+1):
         train(args, i, model, train_loader, optimizer)
         loss = test(args, i, model, val_loader)
