@@ -13,22 +13,37 @@ from scipy.misc import imread, imresize
 class StaticRandomCrop(object):
     def __init__(self, image_size, crop_size):
         self.th, self.tw = crop_size
-        h, w = image_size
+        w, h = image_size
         self.h1 = random.randint(0, h - self.th)
         self.w1 = random.randint(0, w - self.tw)
 
     def __call__(self, img):
-        return img[self.h1:(self.h1+self.th), self.w1:(self.w1+self.tw),:]
+        return img[:,self.h1:(self.h1+self.th), self.w1:(self.w1+self.tw)]
+
+class GetImageBlocks(object):
+    def __init__(self, image_size, crop_size):
+        self.w, self.h = image_size
+        self.th, self.tw = crop_size
+        self.num_blocks = int((self.h * self.w)/(self.th*self.tw))
+
+    def __call__(self, img):
+        temp = np.zeros((self.num_blocks,  img.shape[0], self.th, self.tw), dtype = np.float32)
+        count = 0
+        for i in range(0, self.h, self.th):
+            for j in range(0, self.w, self.tw):
+                temp[count] = img[:, i:i+self.th, j:j+self.tw]
+
+        return temp
 
 class StaticCenterCrop(object):
     def __init__(self, image_size, crop_size):
         self.th, self.tw = crop_size
-        self.h, self.w = image_size
+        self.w, self.h = image_size
     def __call__(self, img):
-        return img[(self.h-self.th)//2:(self.h+self.th)//2, (self.w-self.tw)//2:(self.w+self.tw)//2,:]
+        return img[:,(self.h-self.th)//2:(self.h+self.th)//2, (self.w-self.tw)//2:(self.w+self.tw)//2]
 
 class MpiSintel(data.Dataset):
-    def __init__(self, root, is_cropped = True, crop_size = [4, 4], dstype = 'clean', replicates = 1, train = True, sequence_list = None):
+    def __init__(self, root, is_cropped = True, crop_size = [4, 4], dstype = 'clean', replicates = 1, train = True, sequence_list = None, transforms = None):
         self.is_cropped = is_cropped
         self.crop_size = crop_size
         #self.crop_size_im2 = crop_size[1]
@@ -36,6 +51,8 @@ class MpiSintel(data.Dataset):
         self.replicates = replicates
         flow_root = join(root, 'flow')
         image_root = join(root, dstype)
+        self.train = train
+        self.transforms = transforms
 
         file_list = sorted(glob(join(flow_root, '*/*.flo')))
 
@@ -76,7 +93,7 @@ class MpiSintel(data.Dataset):
 
         self.size = len(self.image_list)
 
-        self.frame_size = frame_utils.read_gen(self.image_list[0][0]).shape
+        self.frame_size = frame_utils.read_gen(self.image_list[0][0]).size
 
         #if (self.render_size[0] < 0) or (self.render_size[1] < 0) or (self.frame_size[0]%64) or (self.frame_size[1]%64):
         #    self.render_size[0] = ( (self.frame_size[0])//64 ) * 64
@@ -92,37 +109,45 @@ class MpiSintel(data.Dataset):
         img1 = frame_utils.read_gen(self.image_list[index][0])
         img2 = frame_utils.read_gen(self.image_list[index][1])
 
-        flow = frame_utils.read_gen(self.flow_list[index])
+        flow = frame_utils.read_gen(self.flow_list[index]).transpose(2,0,1)
 
         images = [img1, img2]
-        image_size = img1.shape[:2]
+        image_size = img1.size
 
-        if self.is_cropped:
-            cropper = StaticRandomCrop(image_size, self.crop_size)
+
+        if self.train:
+            if self.is_cropped:
+                cropper = StaticRandomCrop(image_size, self.crop_size)
+            else:
+                cropper = StaticCenterCrop(image_size, self.render_size)
         else:
-            cropper = StaticCenterCrop(image_size, self.render_size)
+            #cropper = GetImageBlocks(image_size, self.crop_size)
+            cropper = StaticRandomCrop(image_size, self.crop_size)
+        if self.transforms is not None:
+            images = list(map(self.transforms, images))
         images = list(map(cropper, images))
         flow = cropper(flow)
+        #if self.train:
+        flow = flow.reshape((flow.shape[0],flow.shape[2]*flow.shape[1])).transpose(1,0)
+        #else:
+        #    flow = flow.reshape((flow.shape[0],flow.shape[1], flow.shape[2]*flow.shape[3])).transpose(0, 2, 1)
 
-        images = np.array(images).transpose(3,0,1,2)
-        flow = flow.reshape((flow.shape[0]*flow.shape[1],-1))
 
-
-        images = torch.from_numpy(images.astype(np.float32))
+        #images = torch.from_numpy(images.astype(np.float32))
         flow = torch.from_numpy(flow.astype(np.float32))
 
-        return [images], [flow]
+        return images, flow
 
     def __len__(self):
         return self.size * self.replicates
 
 class MpiSintelClean(MpiSintel):
-    def __init__(self, root, is_cropped = True, replicates = 1, train  = True, sequence_list = None):
-        super(MpiSintelClean, self).__init__(root, is_cropped = is_cropped, dstype = 'clean', replicates = replicates, train = train, sequence_list = sequence_list)
+    def __init__(self, root, is_cropped = True, replicates = 1, train  = True, sequence_list = None, transforms = None):
+        super(MpiSintelClean, self).__init__(root, is_cropped = is_cropped, dstype = 'clean', replicates = replicates, train = train, sequence_list = sequence_list, transforms = transforms)
 
 class MpiSintelFinal(MpiSintel):
-    def __init__(self, root, is_cropped = True, replicates = 1, train  = True, sequence_list = None):
-        super(MpiSintelFinal, self).__init__(root, is_cropped = is_cropped, dstype = 'final', replicates = replicates, train = train, sequence_list = sequence_list)
+    def __init__(self, root, is_cropped = True, replicates = 1, train  = True, sequence_list = None, transforms = None):
+        super(MpiSintelFinal, self).__init__(root, is_cropped = is_cropped, dstype = 'final', replicates = replicates, train = train, sequence_list = sequence_list, transforms = transforms)
 
 class ImagesFromFolder(data.Dataset):
   def __init__(self, args, is_cropped, root = '/path/to/frames/only/folder', iext = 'png', replicates = 1):

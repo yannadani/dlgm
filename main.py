@@ -104,6 +104,41 @@ def get_mask(height, width, grid_size = 10):
             u_mask[j//(2**3),i//(2**3)] = 1
     return(u_mask, f_mask)
 
+"""
+
+def test(args, epoch, model, data_loader):
+        total_loss = 0
+
+        model.eval()
+        title = 'Validating Epoch {}'.format(epoch)
+        progress = tqdm(tools.IteratorTimer(data_loader), ncols=120, total=len(data_loader), smoothing=.9, miniters=1, leave=True, desc=title)
+        predictions = []
+        gt = []
+        pck = []
+
+        sys.stdout.flush()
+        with torch.no_grad():
+            for batch_idx, (data, target) in enumerate(progress):
+                target = target.squeeze()
+                for i in range(0, data[0].shape[1], 150):
+                    d = model(data[0][0,i:i+150].squeeze().to(args.device), im_2 = data[1][0, i:i+150].squeeze().to(args.device))
+                    loss = _apply_loss(d, target[i:i+150]).sum()
+                    total_loss += loss.item()
+                    predictions.extend(d.numpy())
+
+                title = '{} Epoch {}'.format('Validating', epoch)
+                pck_sample = tools.calc_pck(np.asarray(predictions), np.asarray(gt))
+                pck.append(pck_sample)
+
+                sys.stdout.flush()
+
+
+        progress.close()
+        
+        print('\tPCK for epoch %d is %f'%(epoch, pck.mean()))
+
+        return total_loss / float(batch_idx + 1), pck.mean()
+"""
 def test(args, epoch, model, data_loader):
         statistics = []
         total_loss = 0
@@ -118,9 +153,7 @@ def test(args, epoch, model, data_loader):
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(progress):
 
-                data = data[0] 
-                target = target[0]
-                d = model(data[:,:,0].to(args.device), im_2 = data[:,:,1].to(args.device))
+                d = model(data[0].to(args.device), im_2 = data[1].to(args.device))
                 loss = _apply_loss(d, target).mean()
                 total_loss += loss.item()
                 predictions.extend(d.numpy())
@@ -155,9 +188,7 @@ def train(args, epoch, model, data_loader, optimizer):
             #data, target = data.to(args.device), target.to(args.device)
 
             optimizer.zero_grad()
-            data = data[0] 
-            target = target[0]
-            d = model(data[:,:,0].to(args.device), im_2 = data[:,:,1].to(args.device))
+            d = model(data[0].to(args.device), im_2 = data[1].to(args.device))
             loss = _apply_loss(d, target).mean()
             
             
@@ -191,9 +222,16 @@ if __name__ == '__main__':
                'pin_memory': True, 
                'drop_last' : True} if args.cuda else {}
 
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+    transforms = transforms.Compose([
+            transforms.ToTensor(),
+            normalize,
+        ])
+
     if args.dataset.lower() == 'sintel':
-        train_dataset = MpiSintelFinal('/cluster/scratch/ninos/3dv/data/sintel/training')
-        val_dataset = MpiSintelFinal('/cluster/scratch/ninos/3dv/data/sintel/training', train = False, sequence_list = train_dataset.sequence_list)
+        train_dataset = MpiSintelFinal('/cluster/scratch/ninos/3dv/data/sintel/training', transforms = transforms)
+        val_dataset = MpiSintelFinal('/cluster/scratch/ninos/3dv/data/sintel/training', train = False, sequence_list = train_dataset.sequence_list, transforms = transforms)
         #test_dataset = MpiSintelFinal('/cluster/scratch/ninos/3dv/data/sintel/test')
     elif args.dataset.lower() == 'middlebury':
         train_dataset = ImagesFromFolder('~/Downloads/MPI-Sintel-complete/training') #TODO: Change the root
