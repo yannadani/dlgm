@@ -67,7 +67,9 @@ class VGG_graph_matching(nn.Module):
         self.upscore16 = nn.ConvTranspose2d(64, 64, 32, stride=16,
                                           bias=False)  
 
-        self.lam = nn.Parameter(torch.ones(128, 128))
+        self.lam1 = nn.Parameter(torch.ones(64, 64))
+        self.lam2 = nn.Parameter(torch.ones(64, 64))
+
 
         self._initialize_weights()
 
@@ -282,7 +284,8 @@ class VGG_graph_matching(nn.Module):
         Y = torch.cat((F2.view(F2.shape[0],F2.shape[1],-1)[:,:,idx2_start], F2.view(F2.shape[0],F2.shape[1],-1)[:,:,idx2_end]), 1).permute(0,2,1)
 
         # (c) Calculate M_e = X * \lambda * Y^T
-        M_e = torch.bmm(torch.bmm(X, self.lam.expand(X.shape[0],-1,-1)), Y.permute(0,2,1))
+        lam = F.relu(torch.cat((torch.cat((self.lam1, self.lam2), dim = 1), torch.cat((self.lam2, self.lam1), dim = 1))))
+        M_e = torch.bmm(torch.bmm(X, lam.expand(X.shape[0],-1,-1)), Y.permute(0,2,1))
 
         # (d) Calculate M_p = U1 * U2^T
         M_p = torch.bmm(U1.view(U1.shape[0], U1.shape[1], -1).permute(0,2,1), U2.view(U2.shape[0], U2.shape[1], -1))
@@ -291,7 +294,6 @@ class VGG_graph_matching(nn.Module):
         diagM_p = self.batch_diagonal(M_p.view(M_p.shape[0],-1))    
         diagM_e = self.batch_diagonal(M_e.view(M_e.shape[0],-1))  
         M = diagM_p + torch.bmm(torch.bmm(self.kronecker(G2, G1).expand(M_p.shape[0],-1,-1), diagM_e), self.kronecker(H2, H1).expand(M_e.shape[0],-1,-1).permute(0, 2,1))
-
         return M
 
     def powerIteration_forward(self, M, N = 10):

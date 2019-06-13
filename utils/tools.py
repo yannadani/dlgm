@@ -140,4 +140,8 @@ def save_checkpoint(state, is_best, path, prefix, filename='checkpoint.pth.tar')
     if is_best:
         shutil.copyfile(name, prefix_save + '_model_best.pth.tar')
 
+def calc_pck(pred, gt, th = 10.):
+    dist = np.linalg.norm(pred - gt, axis = 2)
+    return np.mean(np.mean(dist <= th, axis = 1), axis = 0)
+
 

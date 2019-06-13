@@ -111,6 +111,8 @@ def test(args, epoch, model, data_loader):
         model.eval()
         title = 'Validating Epoch {}'.format(epoch)
         progress = tqdm(tools.IteratorTimer(data_loader), ncols=120, total=len(data_loader), smoothing=.9, miniters=1, leave=True, desc=title)
+        predictions = []
+        gt = []
 
         sys.stdout.flush()
         with torch.no_grad():
@@ -121,6 +123,8 @@ def test(args, epoch, model, data_loader):
                 d = model(data[:,:,0].to(args.device), im_2 = data[:,:,1].to(args.device))
                 loss = _apply_loss(d, target).mean()
                 total_loss += loss.item()
+                predictions.extend(d.numpy())
+                gt.extend(target.numpy())
 
                 # Print out statistics
                 statistics.append(loss.item())
@@ -131,8 +135,10 @@ def test(args, epoch, model, data_loader):
 
 
         progress.close()
+        pck = tools.calc_pck(np.asarray(predictions), np.asarray(gt))
+        print('PCK for epoch %d is %f'%(epoch, pck))
 
-        return total_loss / float(batch_idx + 1)
+        return total_loss / float(batch_idx + 1), pck
 
 def train(args, epoch, model, data_loader, optimizer):
         statistics = []
@@ -212,13 +218,12 @@ if __name__ == '__main__':
     print("Using", torch.cuda.device_count(), "GPUs!")
     model = model.to(args.device)
 
-
     optimizer = optim.Adam(model.parameters(), lr = 1e-5)
-    best_loss = 1e10
+    best_pck = 0.
     for i in range(1, args.n_epochs+1):
         train(args, i, model, train_loader, optimizer)
-        loss = test(args, i, model, val_loader)
-        if loss < best_loss:
-            best_loss = loss
+        loss, pck = test(args, i, model, val_loader)
+        if pck > best_pck:
+            best_pck = pck
             torch.save(model.state_dict(), args.save_path)	 
 		
