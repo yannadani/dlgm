@@ -169,12 +169,13 @@ class VGG_graph_matching(nn.Module):
             else:
                F2 =  x_21[:,:, mask_2[0]]
                U2 =  x_22[:,:, mask_2[1]]
+            F1, U1, F2, U2 = F.normalize(F1), F.normalize(U1), F.normalize(F2), F.normalize(U2)
             
             # Load affinity matrix from CSV
             # - eye --> eye-matrix (WORKING)
             # - 9pt-stencil --> complete 9pt stencil (NOT WORKING => MEMORY ISSUES)
             # - 9pt-stencil-upper --> upper diag + diag of 9pt stencil (WORKING)
-            graphStructure = "9pt-stencil-upper"
+            graphStructure = "eye"
             A = torch.from_numpy(pd.read_csv(graphStructure + '.csv', header=None).values) 
 
             # Build Graph Structure based on given affinity matrix
@@ -339,7 +340,7 @@ class VGG_graph_matching(nn.Module):
         return S
 
 
-    def voting_flow_forward(self, v, alpha=200., th = 10):
+    def voting_flow_forward(self, v, alpha=1., th = 10):
         """
         Arguments:
         ----------

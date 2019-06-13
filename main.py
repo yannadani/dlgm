@@ -187,9 +187,8 @@ if __name__ == '__main__':
 
     if args.dataset.lower() == 'sintel':
         train_dataset = MpiSintelFinal('/cluster/scratch/ninos/3dv/data/sintel/training')
-        val_dataset = MpiSintelClean('/cluster/scratch/ninos/3dv/data/sintel/training')
-        #test_dataset = MpiSintelClean('../data/sintel/test')
-
+        val_dataset = MpiSintelFinal('/cluster/scratch/ninos/3dv/data/sintel/training', train = False, sequence_list = train_dataset.sequence_list)
+        #test_dataset = MpiSintelFinal('/cluster/scratch/ninos/3dv/data/sintel/test')
     elif args.dataset.lower() == 'middlebury':
         train_dataset = ImagesFromFolder('~/Downloads/MPI-Sintel-complete/training') #TODO: Change the root
         val_dataset = ImagesFromFolder('~/Downloads/MPI-Sintel-complete/training')

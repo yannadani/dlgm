@@ -28,9 +28,10 @@ class StaticCenterCrop(object):
         return img[(self.h-self.th)//2:(self.h+self.th)//2, (self.w-self.tw)//2:(self.w+self.tw)//2,:]
 
 class MpiSintel(data.Dataset):
-    def __init__(self, root, is_cropped = True, crop_size = [4, 4], dstype = 'clean', replicates = 1):
+    def __init__(self, root, is_cropped = True, crop_size = [4, 4], dstype = 'clean', replicates = 1, train = True, sequence_list = None):
         self.is_cropped = is_cropped
         self.crop_size = crop_size
+        #self.crop_size_im2 = crop_size[1]
         self.render_size = crop_size
         self.replicates = replicates
         flow_root = join(root, 'flow')
@@ -40,11 +41,25 @@ class MpiSintel(data.Dataset):
 
         self.flow_list = []
         self.image_list = []
+        if train:
+            self.sequence_list = []
+        else:
+            self.sequence_list = sequence_list
 
         for file in file_list:
             if 'test' in file:
                 # print file
                 continue
+            if train and not file.split('/')[-2] in self.sequence_list:
+                if len(self.sequence_list) <= 18:
+                    self.sequence_list.append(file.split('/')[-2])
+                else:
+                    continue
+
+            if not train and file.split('/')[-2] in self.sequence_list:
+                continue
+
+
 
             fbase = file[len(flow_root)+1:]
             fprefix = fbase[:-8]
@@ -102,12 +117,12 @@ class MpiSintel(data.Dataset):
         return self.size * self.replicates
 
 class MpiSintelClean(MpiSintel):
-    def __init__(self, root, is_cropped = True, replicates = 1):
-        super(MpiSintelClean, self).__init__(root, is_cropped = is_cropped, dstype = 'clean', replicates = replicates)
+    def __init__(self, root, is_cropped = True, replicates = 1, train  = True, sequence_list = None):
+        super(MpiSintelClean, self).__init__(root, is_cropped = is_cropped, dstype = 'clean', replicates = replicates, train = train, sequence_list = sequence_list)
 
 class MpiSintelFinal(MpiSintel):
-    def __init__(self, root, is_cropped = True, replicates = 1):
-        super(MpiSintelFinal, self).__init__(root, is_cropped = is_cropped, dstype = 'final', replicates = replicates)
+    def __init__(self, root, is_cropped = True, replicates = 1, train  = True, sequence_list = None):
+        super(MpiSintelFinal, self).__init__(root, is_cropped = is_cropped, dstype = 'final', replicates = replicates, train = train, sequence_list = sequence_list)
 
 class ImagesFromFolder(data.Dataset):
   def __init__(self, args, is_cropped, root = '/path/to/frames/only/folder', iext = 'png', replicates = 1):
