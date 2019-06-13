@@ -83,6 +83,16 @@ def init_config():
     return args
 
 def _apply_loss(d, d_gt):
+    
+    # Set all pixel entries to 0 whose displacement magnitude is bigger than 10px
+    pixel_thresh = 10
+    dispMagnitude = torch.sqrt(torch.pow(d_gt[:,:,0],2) + torch.pow(d_gt[:,:,1], 2)).unsqueeze(-1).expand(-1,-1,2)
+    idx = dispMagnitude > pixel_thresh
+    z = torch.zeros(dispMagnitude.shape)
+    d = torch.where(idx, z, d)
+    d_gt = torch.where(idx, z, d_gt)
+
+    # Calculate loss according to formula in paper
     return torch.sum(torch.sqrt(torch.diagonal(torch.bmm(d - d_gt, (d-d_gt).permute(0,2,1)), dim1=-2, dim2=-1)), dim = 1)
 
 
