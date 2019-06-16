@@ -30,13 +30,14 @@ def init_config():
     parser.add_argument('--eval', action='store_true', default=False, help='Perform Inference')
     parser.add_argument('--load_path', type=str, default='')
     parser.add_argument('--save_flow', action='store_true', default=False, help='Save flow files during evaluation')
+    parser.add_argument('--data_path', type=str, default='data/', help='Path to dataset root directory')
 
     # others
     parser.add_argument('--seed', type=int, default=7, metavar='S', help='random seed')
     parser.add_argument('--number_workers', '-nw', '--num_workers', type=int, default=8)
-    parser.add_argument('--number_gpus', '-ng', type=int, default=2, help='number of GPUs to use')  
-    parser.add_argument('--cuda', action='store_true', default=True, help='Use GPU') 
-    parser.add_argument('--use_vgg', action='store_true', default=True, help='Use VGG weights') 
+    parser.add_argument('--number_gpus', '-ng', type=int, default=2, help='number of GPUs to use')
+    parser.add_argument('--cuda', action='store_true', default=True, help='Use GPU')
+    parser.add_argument('--use_vgg', action='store_true', default=True, help='Use VGG weights')
 
 
 
@@ -83,7 +84,7 @@ def init_config():
     return args
 
 def _apply_loss(d, d_gt):
-    
+
     # Set all pixel entries to 0 whose displacement magnitude is bigger than 10px
     pixel_thresh = 10
     dispMagnitude = torch.sqrt(torch.pow(d_gt[:,:,0],2) + torch.pow(d_gt[:,:,1], 2)).unsqueeze(-1).expand(-1,-1,2)
@@ -96,13 +97,13 @@ def _apply_loss(d, d_gt):
     return torch.sum(torch.sqrt(torch.diagonal(torch.bmm(d - d_gt, (d-d_gt).permute(0,2,1)), dim1=-2, dim2=-1)), dim = 1)
 
 
-def get_mask(height, width, grid_size = 10): 
+def get_mask(height, width, grid_size = 10):
     """
-    Get the location based on the image size corresponding to relu_4_2 
-    and relu_5_1 layer for a desired grid size. 
+    Get the location based on the image size corresponding to relu_4_2
+    and relu_5_1 layer for a desired grid size.
     """
     print(height, width)
-    x_jump = int(width/grid_size) 
+    x_jump = int(width/grid_size)
     y_jump = int(height/grid_size)
     x_idx = np.linspace(int(x_jump/2),int(width - x_jump/2), grid_size, dtype = np.int32)
     y_idx = np.linspace(int(y_jump/2), int(height - y_jump/2), grid_size, dtype = np.int32)
@@ -144,7 +145,7 @@ def test(args, epoch, model, data_loader):
 
 
         progress.close()
-        
+
         print('\tPCK for epoch %d is %f'%(epoch, pck.mean()))
 
         return total_loss / float(batch_idx + 1), pck.mean()
@@ -200,8 +201,8 @@ def train(args, epoch, model, data_loader, optimizer):
             optimizer.zero_grad()
             d = model(data[0].to(args.device), im_2 = data[1].to(args.device))
             loss = _apply_loss(d, target).mean()
-            
-            
+
+
 
             loss.backward()
             #torch.nn.utils.clip_grad_norm_(model.parameters(), args.gradient_clip)
@@ -228,8 +229,8 @@ if __name__ == '__main__':
         sys.stdout = Logger(args.log_path)
 
 
-    gpuargs = {'num_workers': args.effective_number_workers, 
-               'pin_memory': True, 
+    gpuargs = {'num_workers': args.effective_number_workers,
+               'pin_memory': True,
                'drop_last' : True} if args.cuda else {}
 
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -240,17 +241,13 @@ if __name__ == '__main__':
         ])
 
     if args.dataset.lower() == 'sintel':
-        train_dataset = MpiSintelFinal('/cluster/scratch/ninos/3dv/data/sintel/training', transforms = transforms)
-        val_dataset = MpiSintelFinal('/cluster/scratch/ninos/3dv/data/sintel/training', train = False, sequence_list = train_dataset.sequence_list, transforms = transforms)
+        train_dataset = MpiSintelFinal(os.path.join(args.data_path', sintel/training'), transforms = transforms)
+        val_dataset = MpiSintelFinal(os.path.join(args.data_path)'sintel/training'), train = False, sequence_list = train_dataset.sequence_list, transforms = transforms)
         #test_dataset = MpiSintelFinal('/cluster/scratch/ninos/3dv/data/sintel/test')
-    elif args.dataset.lower() == 'middlebury':
-        train_dataset = ImagesFromFolder('~/Downloads/MPI-Sintel-complete/training') #TODO: Change the root
-        val_dataset = ImagesFromFolder('~/Downloads/MPI-Sintel-complete/training')
-        test_dataset = ImagesFromFolder('~/Downloads/MPI-Sintel-complete/training')
     else:
-        raise Exception('Dataset not supported. Choose between Midlebury and Sintel.')
+        raise Exception('Dataset not supported yet.')
         sys.stdout.flush()
-		
+
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size*torch.cuda.device_count(), shuffle=True, **gpuargs)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size_test*torch.cuda.device_count(), shuffle=False, **gpuargs)
@@ -273,5 +270,5 @@ if __name__ == '__main__':
         loss, pck = test(args, i, model, val_loader)
         if pck > best_pck:
             best_pck = pck
-            torch.save(model.state_dict(), args.save_path)	 
-		
+            torch.save(model.state_dict(), args.save_path)
+
