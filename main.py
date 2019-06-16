@@ -21,16 +21,19 @@ from utils import flow_utils, tools
 
 
 def init_config():
+    """
+    INITALIZE  EVERYTHING (Argument Parser, Logging, GPU)
+    """
     parser = argparse.ArgumentParser(description='Deep Learning of Graph matching')
 
     # dataset
     parser.add_argument('--dataset', type=str, default='sintel', help='dataset to use: middlebury/sintel')
+    parser.add_argument('--data_path', type=str, default='data/', help='Path to dataset root directory')
 
     # select mode
     parser.add_argument('--eval', action='store_true', default=False, help='Perform Inference')
     parser.add_argument('--load_path', type=str, default='')
     parser.add_argument('--save_flow', action='store_true', default=False, help='Save flow files during evaluation')
-    parser.add_argument('--data_path', type=str, default='data/', help='Path to dataset root directory')
 
     # others
     parser.add_argument('--seed', type=int, default=7, metavar='S', help='random seed')
@@ -38,7 +41,6 @@ def init_config():
     parser.add_argument('--number_gpus', '-ng', type=int, default=2, help='number of GPUs to use')
     parser.add_argument('--cuda', action='store_true', default=True, help='Use GPU')
     parser.add_argument('--use_vgg', action='store_true', default=True, help='Use VGG weights')
-
 
 
     args = parser.parse_args()
@@ -84,6 +86,19 @@ def init_config():
     return args
 
 def _apply_loss(d, d_gt):
+    """
+    LOSS CALCULATION OF THE BATCH
+
+    Arguments:
+    ----------
+        - d: Computed displacements
+        - d_gt: Ground truth displacements
+
+    Returns:
+    --------
+        - loss: calculate loss according to the specified loss function
+    
+    """
 
     # Set all pixel entries to 0 whose displacement magnitude is bigger than 10px
     pixel_thresh = 10
@@ -115,42 +130,25 @@ def get_mask(height, width, grid_size = 10):
             u_mask[j//(2**3),i//(2**3)] = 1
     return(u_mask, f_mask)
 
-"""
 
 def test(args, epoch, model, data_loader):
-        total_loss = 0
+    """
+    TESTING PROCEDURE
 
-        model.eval()
-        title = 'Validating Epoch {}'.format(epoch)
-        progress = tqdm(tools.IteratorTimer(data_loader), ncols=120, total=len(data_loader), smoothing=.9, miniters=1, leave=True, desc=title)
-        predictions = []
-        gt = []
-        pck = []
+    Parameters:
+    -----------
+        - args: various arguments
+        - epoch: number of epochs 
+        - model: specified model to test
+        - data_loader: specified test data_loader
 
-        sys.stdout.flush()
-        with torch.no_grad():
-            for batch_idx, (data, target) in enumerate(progress):
-                target = target.squeeze()
-                for i in range(0, data[0].shape[1], 150):
-                    d = model(data[0][0,i:i+150].squeeze().to(args.device), im_2 = data[1][0, i:i+150].squeeze().to(args.device))
-                    loss = _apply_loss(d, target[i:i+150]).sum()
-                    total_loss += loss.item()
-                    predictions.extend(d.numpy())
+    Returns:
+    --------
+        - average_loss: average loss per batch
+        - pck: Percentage of Correct Keypoints metric
 
-                title = '{} Epoch {}'.format('Validating', epoch)
-                pck_sample = tools.calc_pck(np.asarray(predictions), np.asarray(gt))
-                pck.append(pck_sample)
+    """
 
-                sys.stdout.flush()
-
-
-        progress.close()
-
-        print('\tPCK for epoch %d is %f'%(epoch, pck.mean()))
-
-        return total_loss / float(batch_idx + 1), pck.mean()
-"""
-def test(args, epoch, model, data_loader):
         statistics = []
         total_loss = 0
 
@@ -184,7 +182,25 @@ def test(args, epoch, model, data_loader):
 
         return total_loss / float(batch_idx + 1), pck
 
+
 def train(args, epoch, model, data_loader, optimizer):
+    """
+    TRAINING PROCEDURE
+
+     Parameters:
+    -----------
+        - args: various arguments
+        - epoch: number of epochs 
+        - model: specified model to test
+        - data_loader: specified train data_loader
+        - optimizer: specified optimizer to use
+
+    Returns:
+    --------
+        - average_loss: average loss per batch
+
+    """
+
         statistics = []
         total_loss = 0
 
@@ -202,10 +218,7 @@ def train(args, epoch, model, data_loader, optimizer):
             d = model(data[0].to(args.device), im_2 = data[1].to(args.device))
             loss = _apply_loss(d, target).mean()
 
-
-
             loss.backward()
-            #torch.nn.utils.clip_grad_norm_(model.parameters(), args.gradient_clip)
             optimizer.step()
             total_loss += loss.item()
             assert not np.isnan(total_loss)
@@ -222,6 +235,9 @@ def train(args, epoch, model, data_loader, optimizer):
 
         return total_loss / float(batch_idx + 1)
 
+# ====================================================================================================================================
+# MAIN PROCEDURE
+# =========================
 
 if __name__ == '__main__':
     args = init_config()
@@ -240,24 +256,29 @@ if __name__ == '__main__':
             normalize,
         ])
 
-    if args.dataset.lower() == 'sintel':
-        train_dataset = MpiSintelFinal(os.path.join(args.data_path', sintel/training'), transforms = transforms)
-        val_dataset = MpiSintelFinal(os.path.join(args.data_path)'sintel/training'), train = False, sequence_list = train_dataset.sequence_list, transforms = transforms)
-        #test_dataset = MpiSintelFinal('/cluster/scratch/ninos/3dv/data/sintel/test')
+
+    # Define path to selected dataset
+    if args.dataset.lower() == 'sintel':        
+        train_dataset = MpiSintelFinal(os.path.join(args.data_path, 'sintel/training'), transforms = transforms)
+        val_dataset = MpiSintelFinal(os.path.join(args.data_path, 'sintel/training'), train = False, sequence_list = train_dataset.sequence_list, transforms = transforms)
+
     else:
         raise Exception('Dataset not supported yet.')
         sys.stdout.flush()
 
 
+    # Create Traiing and Validation data loaders
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size*torch.cuda.device_count(), shuffle=True, **gpuargs)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size_test*torch.cuda.device_count(), shuffle=False, **gpuargs)
-    #test_loader = DataLoader(test_dataset, batch_size=args.batch_size_test, shuffle=False, **gpuargs)
 
+    # Load VGG graph matching model
     model = VGG_graph_matching()
 
+    # Load vgg parameters if specified
     if args.use_vgg:
         model.copy_params_from_vgg16()
 
+    # Setup GPU use
     if torch.cuda.device_count() > 1 and args.number_gpus > 1:
         model = nn.DataParallel(model)
     print("Using", torch.cuda.device_count(), "GPUs!")
@@ -265,6 +286,8 @@ if __name__ == '__main__':
 
     optimizer = optim.Adam(model.parameters(), lr = 1e-5)
     best_pck = 0.
+
+    # Perform specified trainings epochs
     for i in range(1, args.n_epochs+1):
         train(args, i, model, train_loader, optimizer)
         loss, pck = test(args, i, model, val_loader)
