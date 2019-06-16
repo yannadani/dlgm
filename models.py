@@ -58,14 +58,14 @@ class VGG_graph_matching(nn.Module):
 
         # conv5
         self.conv5_1 = nn.Conv2d(512, 512, 3, padding=1)
-        self.relu5_1 = nn.ReLU(inplace=True)   
+        self.relu5_1 = nn.ReLU(inplace=True)
 
-        self.score = nn.Conv2d(512, 64, 1)  
+        self.score = nn.Conv2d(512, 64, 1)
 
         self.upscore32 = nn.ConvTranspose2d(64, 64, 64, stride=32,
-                                          bias=False)  
+                                          bias=False)
         self.upscore16 = nn.ConvTranspose2d(64, 64, 32, stride=16,
-                                          bias=False)  
+                                          bias=False)
 
         self.lam1 = nn.Parameter(torch.ones(64, 64))
         self.lam2 = nn.Parameter(torch.ones(64, 64))
@@ -136,7 +136,7 @@ class VGG_graph_matching(nn.Module):
         h = self.relu5_1(self.conv5_1(h))
 
         x_1 = self.upscore16(self.score(feat1))
-        x_1 = x_1[:, :, 9:9 + x.size()[2], 9:9 + x.size()[3]].contiguous() 
+        x_1 = x_1[:, :, 9:9 + x.size()[2], 9:9 + x.size()[3]].contiguous()
 
 
         x_2 = self.upscore32(self.score(h))
@@ -150,7 +150,7 @@ class VGG_graph_matching(nn.Module):
         """
         FORWARD PASS - IMPLEMENTATION
         """
-        
+
         x_1, x_2 = self.apply_forward(im_1)
 
         if mask_1 is None:
@@ -162,7 +162,7 @@ class VGG_graph_matching(nn.Module):
 
         if im_2 is None:
             return U1, F1
-        
+
         else:
             x_21, x_22 = self.apply_forward(im_2)
             if mask_2 is None:
@@ -172,19 +172,19 @@ class VGG_graph_matching(nn.Module):
                F2 =  x_21[:,:, mask_2[0]]
                U2 =  x_22[:,:, mask_2[1]]
             F1, U1, F2, U2 = F.normalize(F1), F.normalize(U1), F.normalize(F2), F.normalize(U2)
-            
+
             # Load affinity matrix from CSV
             # - eye --> eye-matrix (WORKING)
             # - 9pt-stencil --> complete 9pt stencil (NOT WORKING => MEMORY ISSUES)
             # - 9pt-stencil-upper --> upper diag + diag of 9pt stencil (WORKING)
-            graphStructure = "eye"
-            A = torch.from_numpy(pd.read_csv(graphStructure + '.csv', header=None).values) 
+            graphStructure = "graph_structures/eye"
+            A = torch.from_numpy(pd.read_csv(graphStructure + '.csv', header=None).values)
 
             # Build Graph Structure based on given affinity matrix
             [G, H] = self.buildGraphStructure(A)
 
             # Compute Forward pass using building blocks from paper
-            M = self.affinityMatrix_forward(F1, F2, U1, U2, G, G, H, H) 
+            M = self.affinityMatrix_forward(F1, F2, U1, U2, G, G, H, H)
             v = self.powerIteration_forward(M)
             #S = self.biStochastic_forward(v, G.shape[0], G.shape[0])  # Disable Bi-Stochastic Layer -> not necessary for optical flow
             d = self.voting_flow_forward(v)
@@ -226,7 +226,7 @@ class VGG_graph_matching(nn.Module):
         nr_edges = torch.sum(A).to(torch.int32).item()
 
         # Init G and H
-        G = torch.zeros(n, nr_edges) 
+        G = torch.zeros(n, nr_edges)
         H = torch.zeros(n, nr_edges)
 
         # Get all non-zero entries and build G and H
@@ -240,7 +240,7 @@ class VGG_graph_matching(nn.Module):
     @staticmethod
     def batch_diagonal(input):
         # idea from here: https://discuss.pytorch.org/t/batch-of-diagonal-matrix/13560
-        # batches a stack of vectors (batch x N) -> a stack of diagonal matrices (batch x N x N) 
+        # batches a stack of vectors (batch x N) -> a stack of diagonal matrices (batch x N x N)
         # works in  2D -> 3D, should also work in higher dimensions
         # make a zero matrix, which duplicates the last dim of input
         dims = [input.size(i) for i in torch.arange(input.dim())]
@@ -250,10 +250,10 @@ class VGG_graph_matching(nn.Module):
         # stride across the first dimensions, add one to get the diagonal of the last dimension
         strides = [output.stride(i) for i in torch.arange(input.dim() - 1 )]
         strides.append(output.size(-1) + 1)
-        # stride and copy the imput to the diagonal 
+        # stride and copy the imput to the diagonal
         output.as_strided(input.size(), strides ).copy_(input)
-        return output  
-  
+        return output
+
 
 
     def affinityMatrix_forward(self, F1, F2, U1, U2, G1, G2, H1, H2):
@@ -291,8 +291,8 @@ class VGG_graph_matching(nn.Module):
         M_p = torch.bmm(U1.view(U1.shape[0], U1.shape[1], -1).permute(0,2,1), U2.view(U2.shape[0], U2.shape[1], -1))
 
         # (e) Calculate M = [vec(M_p)] + (G_2 \kronecker G_1)[vec(M_e)](H_2 \kronecker H_1)^T
-        diagM_p = self.batch_diagonal(M_p.view(M_p.shape[0],-1))    
-        diagM_e = self.batch_diagonal(M_e.view(M_e.shape[0],-1))  
+        diagM_p = self.batch_diagonal(M_p.view(M_p.shape[0],-1))
+        diagM_e = self.batch_diagonal(M_e.view(M_e.shape[0],-1))
         M = diagM_p + torch.bmm(torch.bmm(self.kronecker(G2, G1).expand(M_p.shape[0],-1,-1), diagM_e), self.kronecker(H2, H1).expand(M_e.shape[0],-1,-1).permute(0, 2,1))
         return M
 
@@ -304,18 +304,18 @@ class VGG_graph_matching(nn.Module):
 
         Returns:
         --------
-            - v*: optimal assignment vector (computed using power iterations) 
+            - v*: optimal assignment vector (computed using power iterations)
         """
 
 
         # Init starting v
         v = torch.ones(M.shape[0], M.shape[2], 1)
 
-        # Perform N iterations: v_k+1 = M*v_k / (||M*v_k||_2) 
+        # Perform N iterations: v_k+1 = M*v_k / (||M*v_k||_2)
         for i in range(N):
             v = F.normalize(torch.bmm(M, v), dim=1)
 
-        return v    
+        return v
 
 
     def biStochastic_forward(self, v, n, m, N = 1):
@@ -369,11 +369,11 @@ class VGG_graph_matching(nn.Module):
         S = alpha * v.view(v.shape[0], n, -1)
         S_ = F.softmax(S, dim = -1)
         P_x_ = torch.bmm(S_, P_x)
-        P_y_ = torch.bmm(S_, P_y) 
+        P_y_ = torch.bmm(S_, P_y)
         d_x = P_x_ - P_x
         d_y = P_y_ - P_y
         d = torch.cat((d_x, d_y), dim=2)
-        
+
         return d
 
 
@@ -392,7 +392,7 @@ class VGG_graph_matching(nn.Module):
         """
         S_ = alpha*S
         #TODO: Apply th
-        P_ = torch.bmm(F.softmax(S, dim = -1), P.expand(S_.shape[0], -1 , -1)) 
+        P_ = torch.bmm(F.softmax(S, dim = -1), P.expand(S_.shape[0], -1 , -1))
         d = torch.zeros(P.shape)
         for i in range(P.shape[0]):
             d[:, i] = P_ -  P[:, i]
