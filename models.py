@@ -21,7 +21,11 @@ def get_upsampling_weight(in_channels, out_channels, kernel_size):
     return torch.from_numpy(weight).float()
 
 
+
 class VGG_graph_matching(nn.Module):
+    """
+    GRAPH MATCHING FRAMEWORK (bsed on VGG network)
+    """
     def __init__(self):
         super(VGG_graph_matching, self).__init__()
         # conv1
@@ -67,18 +71,14 @@ class VGG_graph_matching(nn.Module):
         self.upscore16 = nn.ConvTranspose2d(64, 64, 32, stride=16,
                                           bias=False)
 
+        # Trainable Lambda Parameters from Affinity Matrix Layer
         self.lam1 = nn.Parameter(torch.ones(64, 64))
         self.lam2 = nn.Parameter(torch.ones(64, 64))
-
 
         self._initialize_weights()
 
     def _initialize_weights(self):
         for m in self.modules():
-            #if isinstance(m, nn.Conv2d):
-            #    m.weight.data.zero_()
-            #    if m.bias is not None:
-            #        m.bias.data.zero_()
             if isinstance(m, nn.ConvTranspose2d):
                 assert m.kernel_size[0] == m.kernel_size[1]
                 initial_weight = get_upsampling_weight(
@@ -86,6 +86,9 @@ class VGG_graph_matching(nn.Module):
                 m.weight.data.copy_(initial_weight)
 
     def copy_params_from_vgg16(self):
+        """
+            RETRIEVES VGG PARAMETERS (pretrained or not pretrained network)
+        """
         vgg16 = models.vgg16(pretrained = True)   # Enabling/Disabling Pretrained-Version of VGG
         features = [
             self.conv1_1, self.relu1_1,
@@ -111,7 +114,20 @@ class VGG_graph_matching(nn.Module):
                 l2.weight.data.copy_(l1.weight.data)
                 l2.bias.data.copy_(l1.bias.data)
 
+
     def apply_forward(self, x):
+        """
+        RETRIEVE NODE FEATURES FROM VGG
+
+        Arguments:
+        ----------
+            - x: input images (batch)
+
+        Returns:
+        --------
+            - x_1, x_2: node features extracted at different levels (upsampled using tranposed convolutions)
+
+        """
         h = x
         h = self.relu1_1(self.conv1_1(h))
         h = self.relu1_2(self.conv1_2(h))
@@ -149,8 +165,21 @@ class VGG_graph_matching(nn.Module):
     def forward(self, im_1, mask_1=None, im_2 = None, mask_2 = None):
         """
         FORWARD PASS - IMPLEMENTATION
+
+        Arguments:
+        ----------
+            - im_1: input images (batch)
+            - mask_1: mask to select gridpoints
+            - im_2: input images (batch)
+            - mask_2: mask to selct gridpoints
+
+        Returns:
+        --------
+            - d: displacement vector of complete batch
+
         """
 
+        # Get node features
         x_1, x_2 = self.apply_forward(im_1)
 
         if mask_1 is None:
@@ -174,10 +203,11 @@ class VGG_graph_matching(nn.Module):
             F1, U1, F2, U2 = F.normalize(F1), F.normalize(U1), F.normalize(F2), F.normalize(U2)
 
             # Load affinity matrix from CSV
-            # - eye --> eye-matrix (WORKING)
-            # - 9pt-stencil --> complete 9pt stencil (NOT WORKING => MEMORY ISSUES)
-            # - 9pt-stencil-upper --> upper diag + diag of 9pt stencil (WORKING)
-            graphStructure = "graph_structures/eye"
+            # - eye (only self node-to-node edges => WORKING)
+            # - 5pt-stencil (WORKING)
+            # - 9pt-stencil full with edges in both directions => MEMORY ISSUES)
+            # - 9pt-stencil-upper (WORKING)
+            graphStructure = "graph_structures/5pt-stencil"
             A = torch.from_numpy(pd.read_csv(graphStructure + '.csv', header=None).values)
 
             # Build Graph Structure based on given affinity matrix
@@ -191,6 +221,17 @@ class VGG_graph_matching(nn.Module):
 
             return d
 
+
+
+    # ==================================================================
+    # HELPER FUNCTIONS
+    # ------------------------------------------------------------------
+    #    - Batch-wise Kronecker Product 
+    #           => kronecker()
+    #    - Batch-wise Diagonalization 
+    #           => batch_diagonal()
+    #    - Build node-edge incidence matrics from affinity matrix 
+    #           =>  buildGraphStructure()
 
     def kronecker(self, matrix1, matrix2):
         """
@@ -207,8 +248,37 @@ class VGG_graph_matching(nn.Module):
         return torch.ger(matrix1.view(-1), matrix2.view(-1)).reshape(*(matrix1.size() + matrix2.size())).permute([0, 2, 1, 3]).reshape(matrix1.size(0) * matrix2.size(0), matrix1.size(1) * matrix2.size(1))
 
 
+    @staticmethod
+    def batch_diagonal(input):
+        """
+        Arguments:
+        ----------
+            - input: input matrix (batch-wise) with entries that should be placed on the diagonals (Dimension: batch x N)
+
+        Returns:
+        --------
+            - output: stack of diagonal matrices (Dimension: batch x N x N)
+        
+        """
+        dims = [input.size(i) for i in torch.arange(input.dim())]
+        dims.append(dims[-1])
+        output = torch.zeros(dims)
+      
+        # stride across the first dimensions, add one to get the diagonal of the last dimension
+        strides = [output.stride(i) for i in torch.arange(input.dim() - 1 )]
+        strides.append(output.size(-1) + 1)
+
+        # stride and copy the imput to the diagonal
+        output.as_strided(input.size(), strides ).copy_(input)
+
+        return output
+
+
+
     def buildGraphStructure(self, A):
         """
+        BUILDS NODE-EDGE INCIDENCE MATRICES G AND H FROM GIVEN AFFINITY MATRIX
+
         Arguments:
         ----------
             - A: node-to-node adjaceny matrix
@@ -237,49 +307,46 @@ class VGG_graph_matching(nn.Module):
 
         return [G, H]
 
-    @staticmethod
-    def batch_diagonal(input):
-        # idea from here: https://discuss.pytorch.org/t/batch-of-diagonal-matrix/13560
-        # batches a stack of vectors (batch x N) -> a stack of diagonal matrices (batch x N x N)
-        # works in  2D -> 3D, should also work in higher dimensions
-        # make a zero matrix, which duplicates the last dim of input
-        dims = [input.size(i) for i in torch.arange(input.dim())]
-        dims.append(dims[-1])
-        output = torch.zeros(dims)
-        #output = torch.zeros(dims, device=self.device)
-        # stride across the first dimensions, add one to get the diagonal of the last dimension
-        strides = [output.stride(i) for i in torch.arange(input.dim() - 1 )]
-        strides.append(output.size(-1) + 1)
-        # stride and copy the imput to the diagonal
-        output.as_strided(input.size(), strides ).copy_(input)
-        return output
 
 
+    # ==================================================================
+    # FUNCTIONS REPRESENTING THE COMPUTATIONAL LAYERS
+    # ------------------------------------------------------------------
+    #   - Affinity Matrix Layer 
+    #           => affinityMatrix_forward()
+    #   - Power Iteration Layer 
+    #           => powerIteration_forward()
+    #   - BiStochastic Layer 
+    #           => biStochastic_forward()
+    #   - Voting Layer (based on assignment vector v) 
+    #           => voting_flow_forward()
+    #   - Voting Layer (based on bistochastic matrix S) 
+    #           => voting_forward()
+    #
 
     def affinityMatrix_forward(self, F1, F2, U1, U2, G1, G2, H1, H2):
         """
+        AFFINITY MATRIX LAYER
+
         Arguments:
         ----------
-            - F1, F2: edge features of input image 1 and 2
-            - U1, U2: node features of input image 1 and 2
-            - G1, H1: node-edge incidence matrices of image 1
+            - F1, F2: edge features of input image 1 and 2 (of complete batch)
+            - U1, U2: node features of input image 1 and 2 (of complete batch)
+            - G1, H1: node-edge incidence matrices of image 1 
             - G2, H2: node-edge incidence matrices of image 2
 
         Returns:
         ----------
-            - M: affinity Matrix computed according to the given formula
+            - M: global affinity matrix (of complete batch)
 
         """
-        # (a) Build X and Y
-        #     - Get ordering of edges from G and H
-        #     - Extract edge features of start and end nodes
+        # (a) Get node start and end indices of edges
         idx1_start = (G1 != 0).nonzero()[:,0]
         idx2_start = (G2 != 0).nonzero()[:,0]
         idx1_end = (H1 != 0).nonzero()[:,0]
         idx2_end = (H2 != 0).nonzero()[:,0]
 
-
-        # (b) Concat feature vectors (as described in paper)
+        # (b) Build X and Y
         X = torch.cat((F1.view(F1.shape[0],F1.shape[1],-1)[:,:,idx1_start], F1.view(F1.shape[0],F1.shape[1],-1)[:,:,idx1_end]), 1).permute(0,2,1)
         Y = torch.cat((F2.view(F2.shape[0],F2.shape[1],-1)[:,:,idx2_start], F2.view(F2.shape[0],F2.shape[1],-1)[:,:,idx2_end]), 1).permute(0,2,1)
 
@@ -287,31 +354,38 @@ class VGG_graph_matching(nn.Module):
         lam = F.relu(torch.cat((torch.cat((self.lam1, self.lam2), dim = 1), torch.cat((self.lam2, self.lam1), dim = 1))))
         M_e = torch.bmm(torch.bmm(X, lam.expand(X.shape[0],-1,-1)), Y.permute(0,2,1))
 
-        # (d) Calculate M_p = U1 * U2^T
+        # (d) Calculate M_p = U1 * U2^T 
         M_p = torch.bmm(U1.view(U1.shape[0], U1.shape[1], -1).permute(0,2,1), U2.view(U2.shape[0], U2.shape[1], -1))
 
-        # (e) Calculate M = [vec(M_p)] + (G_2 \kronecker G_1)[vec(M_e)](H_2 \kronecker H_1)^T
+        # (e) Calculate node-to-node and edge-to-edge similarity matrices 
         diagM_p = self.batch_diagonal(M_p.view(M_p.shape[0],-1))
         diagM_e = self.batch_diagonal(M_e.view(M_e.shape[0],-1))
+
+        # (f) Calculate M = [vec(M_p)] + (G_2 \kronecker G_1)[vec(M_e)](H_2 \kronecker H_1)^T 
         M = diagM_p + torch.bmm(torch.bmm(self.kronecker(G2, G1).expand(M_p.shape[0],-1,-1), diagM_e), self.kronecker(H2, H1).expand(M_e.shape[0],-1,-1).permute(0, 2,1))
+        
         return M
+
 
     def powerIteration_forward(self, M, N = 10):
         """
+        POWER ITERATION LAYER
+
         Arguments:
         ----------
-            - M: affinity matrix
+            - M: affinity matrix (of complete batch)
 
         Returns:
         --------
-            - v*: optimal assignment vector (computed using power iterations)
+            - v*: optimal assignment vector (of every sample in the batch)
         """
 
 
-        # Init starting v
+        # Init starting assignment-vector
         v = torch.ones(M.shape[0], M.shape[2], 1)
 
-        # Perform N iterations: v_k+1 = M*v_k / (||M*v_k||_2)
+        # Perform N power iterations:
+        # v_k+1 = M*v_k / (||M*v_k||_2)
         for i in range(N):
             v = F.normalize(torch.bmm(M, v), dim=1)
 
@@ -320,9 +394,12 @@ class VGG_graph_matching(nn.Module):
 
     def biStochastic_forward(self, v, n, m, N = 1):
         """
+        BISTOCHASTIC LAYER
+        => not used for optical flow generation
+
         Arguments:
         ----------
-            - v:     optimal assignment vector
+            - v:     optimal assignment vector (of complete batch)
             - n, m:  dimension of nodes of image 1 and image 2
 
         Returns:
@@ -344,9 +421,11 @@ class VGG_graph_matching(nn.Module):
 
     def voting_flow_forward(self, v, alpha=1., th = 10):
         """
+        VOTING LAYER BASED ON ASSIGNMENT VECTOR
+
         Arguments:
         ----------
-            v: optimal assignment vector (output from power iteration)
+            v: optimal assignment vector (of complete batch)
             alpha: scale value in softmax
             th: threshold value
 
@@ -379,9 +458,11 @@ class VGG_graph_matching(nn.Module):
 
     def voting_forward(self, S, P, alpha = 200., th = 10):
         """
+        VOTING LAYER BASED ON BISTOCHASTIC MATRIX
+
         Arguments:
         ----------
-            S - confidence map obtained form bi-stochastic layer
+            S - confidence map obtained form bi-stochastic layer (of complete batch)
             P - Position matrix (m x 2)
             alpha - scaling factor
             th - number of pixels to be set as threshold beyond which confidence levels are set to zero.
@@ -391,7 +472,7 @@ class VGG_graph_matching(nn.Module):
 
         """
         S_ = alpha*S
-        #TODO: Apply th
+        #TODO: Apply threshold
         P_ = torch.bmm(F.softmax(S, dim = -1), P.expand(S_.shape[0], -1 , -1))
         d = torch.zeros(P.shape)
         for i in range(P.shape[0]):
