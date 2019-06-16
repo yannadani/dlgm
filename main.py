@@ -148,39 +148,39 @@ def test(args, epoch, model, data_loader):
         - pck: Percentage of Correct Keypoints metric
 
     """
+    
+    statistics = []
+    total_loss = 0
 
-        statistics = []
-        total_loss = 0
+    model.eval()
+    title = 'Validating Epoch {}'.format(epoch)
+    progress = tqdm(tools.IteratorTimer(data_loader), ncols=120, total=len(data_loader), smoothing=.9, miniters=1, leave=True, desc=title)
+    predictions = []
+    gt = []
 
-        model.eval()
-        title = 'Validating Epoch {}'.format(epoch)
-        progress = tqdm(tools.IteratorTimer(data_loader), ncols=120, total=len(data_loader), smoothing=.9, miniters=1, leave=True, desc=title)
-        predictions = []
-        gt = []
+    sys.stdout.flush()
+    with torch.no_grad():
+        for batch_idx, (data, target) in enumerate(progress):
 
-        sys.stdout.flush()
-        with torch.no_grad():
-            for batch_idx, (data, target) in enumerate(progress):
+            d = model(data[0].to(args.device), im_2 = data[1].to(args.device))
+            loss = _apply_loss(d, target).mean()
+            total_loss += loss.item()
+            predictions.extend(d.numpy())
+            gt.extend(target.numpy())
 
-                d = model(data[0].to(args.device), im_2 = data[1].to(args.device))
-                loss = _apply_loss(d, target).mean()
-                total_loss += loss.item()
-                predictions.extend(d.numpy())
-                gt.extend(target.numpy())
+            # Print out statistics
+            statistics.append(loss.item())
+            title = '{} Epoch {}'.format('Validating', epoch)
 
-                # Print out statistics
-                statistics.append(loss.item())
-                title = '{} Epoch {}'.format('Validating', epoch)
-
-                progress.set_description(title + '\tLoss:\t'+ str(statistics[-1]))
-                sys.stdout.flush()
+            progress.set_description(title + '\tLoss:\t'+ str(statistics[-1]))
+            sys.stdout.flush()
 
 
-        progress.close()
-        pck = tools.calc_pck(np.asarray(predictions), np.asarray(gt))
-        print('PCK for epoch %d is %f'%(epoch, pck))
+    progress.close()
+    pck = tools.calc_pck(np.asarray(predictions), np.asarray(gt))
+    print('PCK for epoch %d is %f'%(epoch, pck))
 
-        return total_loss / float(batch_idx + 1), pck
+    return total_loss / float(batch_idx + 1), pck
 
 
 def train(args, epoch, model, data_loader, optimizer):
@@ -200,40 +200,40 @@ def train(args, epoch, model, data_loader, optimizer):
         - average_loss: average loss per batch
 
     """
+    
+    statistics = []
+    total_loss = 0
 
-        statistics = []
-        total_loss = 0
+    model.train()
+    title = 'Training Epoch {}'.format(epoch)
+    progress = tqdm(tools.IteratorTimer(data_loader), ncols=120, total=len(data_loader), smoothing=.9, miniters=1, leave=True, desc=title)
 
-        model.train()
-        title = 'Training Epoch {}'.format(epoch)
-        progress = tqdm(tools.IteratorTimer(data_loader), ncols=120, total=len(data_loader), smoothing=.9, miniters=1, leave=True, desc=title)
+    sys.stdout.flush()
 
+    for batch_idx, (data, target) in enumerate(progress):
+
+        #data, target = data.to(args.device), target.to(args.device)
+
+        optimizer.zero_grad()
+        d = model(data[0].to(args.device), im_2 = data[1].to(args.device))
+        loss = _apply_loss(d, target).mean()
+
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+        assert not np.isnan(total_loss)
+
+        # Print out statistics
+        statistics.append(loss.item())
+        title = '{} Epoch {}'.format('Training', epoch)
+
+        progress.set_description(title + '\tLoss:\t'+ str(statistics[-1]))
         sys.stdout.flush()
 
-        for batch_idx, (data, target) in enumerate(progress):
 
-            #data, target = data.to(args.device), target.to(args.device)
+    progress.close()
 
-            optimizer.zero_grad()
-            d = model(data[0].to(args.device), im_2 = data[1].to(args.device))
-            loss = _apply_loss(d, target).mean()
-
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item()
-            assert not np.isnan(total_loss)
-
-            # Print out statistics
-            statistics.append(loss.item())
-            title = '{} Epoch {}'.format('Training', epoch)
-
-            progress.set_description(title + '\tLoss:\t'+ str(statistics[-1]))
-            sys.stdout.flush()
-
-
-        progress.close()
-
-        return total_loss / float(batch_idx + 1)
+    return total_loss / float(batch_idx + 1)
 
 # ====================================================================================================================================
 # MAIN PROCEDURE
@@ -257,10 +257,17 @@ if __name__ == '__main__':
         ])
 
 
+
     # Define path to selected dataset
-    if args.dataset.lower() == 'sintel':        
+    if args.dataset.lower() == 'sintel':    
+
+        # Check if specified path exists
+        if not os.path.exists(os.path.join(args.data_path,'sintel/training')):
+            raise Exception("Could not find specified dataset => Use argument --data_path to specify path")
+
+        # Setup data loader    
         train_dataset = MpiSintelFinal(os.path.join(args.data_path, 'sintel/training'), transforms = transforms)
-        val_dataset = MpiSintelFinal(os.path.join(args.data_path, 'sintel/training'), train = False, sequence_list = train_dataset.sequence_list, transforms = transforms)
+        val_dataset = MpiSintelFinal(os.path.join(args.data_path, 'sintel/training'),  train = False, sequence_list = train_dataset.sequence_list, transforms = transforms)
 
     else:
         raise Exception('Dataset not supported yet.')
