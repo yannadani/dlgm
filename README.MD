@@ -6,6 +6,7 @@ This is an implementation of the paper "Deep Learning of Graph Matching", CVPR, 
 To run the above code, install the dependecies as listed in `environment.yml`. The easiest way to do this is to setup a conda environemnt
 
 `conda env create -f environment.yml`
+
 `conda activate dlgm`
 
 Then update the parameters in the `config_sintel.py` script according to your hardware availability and needs. 
